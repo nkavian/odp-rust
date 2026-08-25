@@ -1,0 +1,26 @@
+[package]
+name = "odp-examples"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+odp-agent = { path = "../crates/odp-agent" }
+odp-core = { path = "../crates/odp-core" }
+odp-service = { path = "../crates/odp-service" }
+serde.workspace = true
+serde_json.workspace = true
+tiny_http.workspace = true
+tokio.workspace = true
+
+[[bin]]
+name = "odp-agent-discovery"
+path = "odp-agent-discovery/main.rs"
+
+[[bin]]
+name = "odp-service-small"
+path = "odp-service-small/main.rs"
+
+[lints]
+workspace = true

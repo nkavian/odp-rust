@@ -80,6 +80,17 @@ contents and metadata of every publishable crate.
 See [`odp-specs`](https://github.com/offering-protocol/odp-specs) for the normative draft, schemas,
 examples, and test vectors.
 
+Runnable Agent and Service integrations are available in [`examples`](examples/). The shared ODP
+conformance harness and the real Node Service interoperability check can be run with:
+
+```sh
+make conformance
+make interoperability
+```
+
+These development checks use sibling `odp-specs` and `odp-node` clones by default. Set
+`ODP_SPECS_DIR` or `ODP_NODE_DIR` when those repositories live elsewhere.
+
 ## Security
 
 See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
