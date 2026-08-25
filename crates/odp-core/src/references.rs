@@ -74,6 +74,9 @@ pub fn resolve_resource_reference(
     let resolved = origin
         .join(reference)
         .map_err(|error| ReferenceError::InvalidUrl(error.to_string()))?;
+    if !resolved.username().is_empty() || resolved.password().is_some() {
+        return Err(ReferenceError::UserInformation);
+    }
     if resolved.fragment().is_some() {
         return Err(ReferenceError::Fragment);
     }
@@ -163,6 +166,17 @@ mod tests {
         assert_eq!(
             resolve_continuation("https://other.example/next", "https://example.com"),
             Err(ReferenceError::CrossOriginContinuation)
+        );
+    }
+
+    #[test]
+    fn rejects_user_information_in_resource_reference() {
+        assert_eq!(
+            resolve_resource_reference(
+                "https://user@catalog.example/offerings/123",
+                "https://example.com"
+            ),
+            Err(ReferenceError::UserInformation)
         );
     }
 

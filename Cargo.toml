@@ -4,6 +4,8 @@ members = [
   "crates/odp-core",
   "crates/odp-directory",
   "crates/odp-service",
+  "examples",
+  "tools/odp-conformance",
 ]
 resolver = "3"
 
@@ -35,4 +37,5 @@ serde_json = "1.0.151"
 sha2 = "0.11.0"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["macros", "rt"] }
+tiny_http = "0.12.0"
 url = "2.5.8"

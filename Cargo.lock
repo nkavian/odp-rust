@@ -32,6 +32,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "ascii"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
+
+[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,6 +183,12 @@ dependencies = [
  "cpufeatures",
  "rand_core",
 ]
+
+[[package]]
+name = "chunked_transfer"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
 
 [[package]]
 name = "cmake"
@@ -1017,6 +1029,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "odp-conformance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "odp-agent",
+ "odp-core",
+ "odp-service",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "odp-core"
 version = "0.1.0"
 dependencies = [
@@ -1041,6 +1066,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "odp-examples"
+version = "0.1.0"
+dependencies = [
+ "odp-agent",
+ "odp-core",
+ "odp-service",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "tokio",
 ]
 
 [[package]]
@@ -1704,6 +1742,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+]
+
+[[package]]
+name = "tiny_http"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "389915df6413a2e74fb181895f933386023c71110878cd0825588928e64cdc82"
+dependencies = [
+ "ascii",
+ "chunked_transfer",
+ "httpdate",
+ "log",
 ]
 
 [[package]]

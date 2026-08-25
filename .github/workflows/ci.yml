@@ -21,6 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check out ODP specifications
+        uses: actions/checkout@v7
+        with:
+          repository: offering-protocol/odp-specs
+          path: .conformance/odp-specs
+
       - name: Install Rust toolchain
         run: rustup toolchain install "${{ matrix.rust }}" --profile minimal --component clippy,rustfmt
 
@@ -28,3 +34,18 @@ jobs:
         run: make verify
         env:
           RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+
+      - name: Run shared conformance harness
+        run: make conformance
+        env:
+          ODP_SPECS_DIR: .conformance/odp-specs
+          RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+
+      - name: Upload conformance reports
+        if: matrix.rust == '1.85.0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: odp-rust-conformance
+          path: .conformance/reports/*.json
+          if-no-files-found: error
+          retention-days: 7

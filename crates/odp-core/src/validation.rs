@@ -384,7 +384,19 @@ fn validate_localizations(
 }
 
 fn valid_language_tag(value: &str) -> bool {
-    value.parse::<LanguageTag>().is_ok()
+    let Ok(tag) = value.parse::<LanguageTag>() else {
+        return false;
+    };
+    let mut variants = std::collections::BTreeSet::new();
+    if tag
+        .variant_subtags()
+        .any(|variant| !variants.insert(variant.to_ascii_lowercase()))
+    {
+        return false;
+    }
+    let mut extensions = std::collections::BTreeSet::new();
+    !tag.extension_subtags()
+        .any(|(singleton, _)| !extensions.insert(singleton.to_ascii_lowercase()))
 }
 
 fn filter_definition_issues(value: &FilterDefinition) -> Vec<ValidationIssue> {
@@ -453,5 +465,22 @@ mod tests {
             panic!("expected validation error");
         };
         assert!(!error.issues.is_empty());
+    }
+
+    #[test]
+    fn rejects_duplicate_language_variants() {
+        let document = br#"{
+            "description":"An example Service.",
+            "http":{"endpoint_base":"/odp"},
+            "language":"sl-rozaj-rozaj",
+            "localizations":["sl-rozaj-rozaj"],
+            "name":"Example",
+            "odp_version":"1.0",
+            "operations":[
+                {"authentication":"not-required","name":"get-offering"},
+                {"authentication":"not-required","name":"list-offerings"}
+            ]
+        }"#;
+        assert!(parse_service_document(document).is_err());
     }
 }
