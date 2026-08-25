@@ -1,0 +1,22 @@
+[workspace]
+members = [
+  "crates/odp-agent",
+  "crates/odp-core",
+  "crates/odp-directory",
+  "crates/odp-service",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Nas Kavian <nas@inflowpay.ai>"]
+license = "MIT"
+repository = "https://github.com/offering-protocol/odp-rust"
+homepage = "https://www.offeringprotocol.org/"
+keywords = ["agent", "discovery", "odp", "offering", "protocol"]
+categories = ["api-bindings", "web-programming"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

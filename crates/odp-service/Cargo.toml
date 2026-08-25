@@ -1,0 +1,17 @@
+[package]
+name = "odp-service"
+description = "Service-side integration for the Offering Discovery Protocol."
+documentation = "https://docs.rs/odp-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
