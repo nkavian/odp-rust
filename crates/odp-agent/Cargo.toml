@@ -13,5 +13,21 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
+[dependencies]
+futures.workspace = true
+httpdate.workspace = true
+jsonschema.workspace = true
+odp-core = { version = "0.1.0", path = "../odp-core" }
+odp-directory = { version = "0.1.0", path = "../odp-directory" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio.workspace = true
+
 [lints]
 workspace = true

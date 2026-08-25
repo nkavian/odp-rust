@@ -29,6 +29,34 @@ Agent and Directory networking is asynchronous. The role crates provide an ergon
 HTTP transport while preserving an injectable transport boundary. Service integration remains
 independent of a particular Rust web framework.
 
+## Installation
+
+Add only the crates required by the integration role:
+
+```toml
+[dependencies]
+odp-agent = "0.1.0"
+odp-core = "0.1.0"
+odp-directory = "0.1.0"
+odp-service = "0.1.0"
+```
+
+An Agent normally uses `odp-agent`, which brings in Core and Directory. A Service normally uses
+`odp-service`, which brings in Core. The individual crate guides contain executable API examples.
+
+## Protocol behavior
+
+- The Directory client has fixed production and sandbox origins. Callers cannot supply an arbitrary
+  Directory endpoint.
+- Agent responses are schema-validated before being returned. Service Documents, Collections, and
+  Offerings use separate default cache lifetimes and support HTTP revalidation.
+- Directory and Agent traversal follow opaque `next` references with explicit bounds of 16
+  pages and 10,000 resources.
+- Federated Agent discovery searches Services concurrently while yielding results in Directory
+  order. A failure from one Service becomes an issue event instead of discarding other results.
+- The Service crate validates configuration and responses but does not impose a web framework or
+  storage model. `StaticCatalog` provides the small-catalog integration path.
+
 ## Development
 
 Rust 1.85 or newer is required. The repository toolchain follows current stable Rust while continuous
