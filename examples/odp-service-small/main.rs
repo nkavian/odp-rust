@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, io, sync::Arc};
 
-use odp_core::{parse_collection, parse_offering, parse_service_document};
-use odp_service::{Request, Service, StaticCatalog, StaticCatalogOptions};
+use odp_core::{parse_collection, parse_offering};
+use odp_service::{Request, Service, ServiceBuilder, StaticCatalog, StaticCatalogOptions};
 use tiny_http::{Header, Response as HttpResponse, Server};
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -64,9 +64,6 @@ fn header(
 }
 
 fn service() -> Result<Service, Box<dyn std::error::Error + Send + Sync>> {
-    let document = parse_service_document(
-        br#"{"description":"Resources and services for ODP integrators.","http":{"endpoint_base":"/odp"},"keywords":["agent","developer","documentation"],"language":"en","localizations":["en"],"name":"ODP Developer Resources","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}]}"#,
-    )?;
     let collection = parse_collection(
         br#"{"description":"Guides and reference materials","id":"resources","name":"Resources","odp_version":"1.0"}"#,
     )?;
@@ -80,5 +77,12 @@ fn service() -> Result<Service, Box<dyn std::error::Error + Send + Sync>> {
         collections: vec![collection],
         offerings: vec![guide, review],
     })?;
-    Ok(Service::new(document, Arc::new(catalog))?)
+    Ok(ServiceBuilder::new(
+        "ODP Developer Resources",
+        "Resources and services for ODP integrators.",
+        "en",
+        "/odp",
+    )
+    .keywords(["agent", "developer", "documentation"])
+    .build(Arc::new(catalog))?)
 }

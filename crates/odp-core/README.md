@@ -31,5 +31,41 @@ assert_eq!(document.name, "Indica Flowers");
 # Ok::<(), odp_core::ParseError>(())
 ```
 
+Validation failures retain structured paths and schema keywords so applications can present more
+than a generic parse failure:
+
+```rust
+use odp_core::{ParseError, parse_service_document};
+
+let error = parse_service_document(br#"{}"#).unwrap_err();
+if let ParseError::Validation(validation) = error {
+    for issue in validation.issues {
+        println!("{}: {}", issue.path, issue.message);
+    }
+}
+```
+
+Resource identifiers are local to a Service. Compose a stable identity with the canonical Service
+origin, and resolve origin-relative resource links against that same origin:
+
+```rust
+use odp_core::{ResourceIdentity, ResourceType, resolve_resource_reference};
+
+let identity = ResourceIdentity::new(
+    "https://shop.example/.well-known/odp",
+    ResourceType::Offering,
+    "rubber-plant",
+)?;
+let image = resolve_resource_reference("/images/rubber-plant.webp", &identity.service)?;
+
+assert_eq!(identity.service, "https://shop.example");
+assert_eq!(image.as_str(), "https://shop.example/images/rubber-plant.webp");
+# Ok::<(), odp_core::ReferenceError>(())
+```
+
+Unknown additive members are retained in each model's `additional` map. Use
+`parse_problem_response` for an ODP error response when the HTTP status must agree with the Problem
+Details body.
+
 See the [workspace guide](../../README.md) and the
 [ODP specification](https://www.offeringprotocol.org/).

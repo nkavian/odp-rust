@@ -29,6 +29,11 @@ let offerings = client
         },
     )
     .await?;
+
+let details = client.get_offering_details(&offerings[0].id).await?;
+for action in &details.actions {
+    println!("{}: {:?}", action.id, action.rel);
+}
 # Ok(())
 # }
 ```
@@ -45,10 +50,59 @@ are fetched anonymously over HTTPS with independent byte limits and cache entrie
 
 ## Search across Services
 
-`Agent::search_offerings_across_services` searches the canonical Directory, then queries the
-selected Services with bounded concurrency. Its result order remains deterministic. Each
-`DiscoveryEvent` contains either an Offering or a Service-specific issue, allowing one unavailable
-Service to be dropped or reported without failing every successful Service.
+```rust,no_run
+use odp_agent::{Agent, FederatedSearchRequest};
+use odp_core::{OfferingSearchRequest, VERSION};
+use odp_directory::{Environment, SearchRequest};
+
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
+let agent = Agent::new(Environment::Production)?;
+let events = agent
+    .search_offerings_across_services(&FederatedSearchRequest {
+        concurrency: 4,
+        max_offerings_per_service: 25,
+        max_services: 10,
+        offerings: OfferingSearchRequest {
+            odp_version: VERSION.to_owned(),
+            query: "indoor plant".to_owned(),
+            ..OfferingSearchRequest::default()
+        },
+        services: SearchRequest {
+            query: "plants".to_owned(),
+            ..SearchRequest::default()
+        },
+    })
+    .await?;
+
+for event in events {
+    match (event.offering, event.issue) {
+        (Some(offering), _) => println!("{}: {}", event.service.name, offering.name),
+        (_, Some(issue)) => eprintln!("{}: {issue}", event.service.name),
+        _ => {}
+    }
+}
+# Ok(())
+# }
+```
+
+The Agent searches the canonical Directory, then queries the selected Services with bounded
+concurrency. Result order remains deterministic. Each `DiscoveryEvent` contains either an Offering
+or a Service-specific issue, allowing one unavailable Service to be reported without failing every
+successful Service. When the Offering request has no query, filters, refinements, sort, descendant
+selection, or Collection identifier, the Agent lists Offerings instead of requiring Service-side
+search support.
+
+## Actions and protocol composition
+
+`get_offering_details` returns normalized, usable Action targets and structured issues separately
+from the Offering. `resolve_action` can resolve a request schema or a unique OpenAPI 3.1 operation,
+but it never invokes the target. The application uses each Action's authentication requirement and
+the Service Document's AEP, MPP, or x402 advertisement to enroll, authenticate, or pay before making
+the resolved HTTP request.
+
+See the [runnable Agent example](../../examples/odp-agent-discovery) for Directory composition,
+Collection navigation, full Offering details, and Action resolution.
 
 See the [workspace guide](../../README.md) and the
 [ODP specification](https://www.offeringprotocol.org/).
