@@ -6,8 +6,10 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+async-trait.workspace = true
 odp-agent = { path = "../crates/odp-agent" }
 odp-core = { path = "../crates/odp-core" }
+odp-directory = { path = "../crates/odp-directory" }
 odp-service = { path = "../crates/odp-service" }
 serde.workspace = true
 serde_json.workspace = true

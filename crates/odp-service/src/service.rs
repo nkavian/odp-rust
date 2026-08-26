@@ -2,9 +2,11 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use odp_core::{
-    AuthenticationRequirement, Collection, CollectionSearchRequest, Offering, OfferingPage,
-    OfferingSearchRequest, Operation, OperationDescriptor, Page, ProblemDetails, Representation,
-    ServiceDocument, VERSION, is_local_resource_identifier, parse_collection,
+    AdditionalMembers, AuthenticationRequirement, Collection, CollectionSearchRequest,
+    EnrollmentProtocol, HttpConfiguration, McpEndpoint, Offering, OfferingPage,
+    OfferingSearchRequest, Operation, OperationDescriptor, Page, PaymentProtocol, ProblemDetails,
+    Representation, SearchCapabilities, ServiceBranding, ServiceDocument, ServiceOpenApi,
+    ServiceProtocols, VERSION, is_local_resource_identifier, parse_collection,
     parse_collection_search_request, parse_offering, parse_offering_search_request,
     parse_service_document,
 };
@@ -132,6 +134,151 @@ pub trait Catalog: Send + Sync {
         Err(ServiceError::Catalog(
             "list-collection-offerings is unsupported".to_owned(),
         ))
+    }
+}
+
+pub struct ServiceBuilder {
+    document: ServiceDocument,
+}
+
+impl ServiceBuilder {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        language: impl Into<String>,
+        endpoint_base: impl Into<String>,
+    ) -> Self {
+        let language = language.into();
+        Self {
+            document: ServiceDocument {
+                additional: AdditionalMembers::new(),
+                branding: None,
+                description: description.into(),
+                documentation_url: String::new(),
+                http: HttpConfiguration {
+                    additional: AdditionalMembers::new(),
+                    endpoint_base: endpoint_base.into(),
+                    openapi: None,
+                },
+                keywords: Vec::new(),
+                language: language.clone(),
+                localizations: vec![language],
+                mcp: Vec::new(),
+                name: name.into(),
+                odp_version: VERSION.to_owned(),
+                operations: Vec::new(),
+                payment_origins: Vec::new(),
+                protocols: None,
+                search_capabilities: None,
+                status_url: String::new(),
+                support_url: String::new(),
+                website_url: String::new(),
+            },
+        }
+    }
+
+    pub fn branding(mut self, branding: ServiceBranding) -> Self {
+        self.document.branding = Some(branding);
+        self
+    }
+
+    pub fn documentation_url(mut self, url: impl Into<String>) -> Self {
+        self.document.documentation_url = url.into();
+        self
+    }
+
+    pub fn keywords<I, S>(mut self, keywords: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.document.keywords = keywords.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn localizations<I, S>(mut self, localizations: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.document.localizations = localizations.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn mcp(mut self, endpoints: Vec<McpEndpoint>) -> Self {
+        self.document.mcp = endpoints;
+        self
+    }
+
+    pub fn openapi(mut self, openapi: ServiceOpenApi) -> Self {
+        self.document.http.openapi = Some(openapi);
+        self
+    }
+
+    pub fn operation_authentication(
+        mut self,
+        operation: Operation,
+        authentication: AuthenticationRequirement,
+    ) -> Self {
+        if let Some(descriptor) = self
+            .document
+            .operations
+            .iter_mut()
+            .find(|descriptor| descriptor.name == operation)
+        {
+            descriptor.authentication = authentication;
+        } else {
+            self.document.operations.push(OperationDescriptor {
+                authentication,
+                name: operation,
+            });
+        }
+        self
+    }
+
+    pub fn payment_origins<I, S>(mut self, origins: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.document.payment_origins = origins.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn protocols(
+        mut self,
+        enrollment: Vec<EnrollmentProtocol>,
+        payments: Vec<PaymentProtocol>,
+    ) -> Self {
+        self.document.protocols = Some(ServiceProtocols {
+            enrollment,
+            payments,
+        });
+        self
+    }
+
+    pub fn search_capabilities(mut self, capabilities: SearchCapabilities) -> Self {
+        self.document.search_capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn status_url(mut self, url: impl Into<String>) -> Self {
+        self.document.status_url = url.into();
+        self
+    }
+
+    pub fn support_url(mut self, url: impl Into<String>) -> Self {
+        self.document.support_url = url.into();
+        self
+    }
+
+    pub fn website_url(mut self, url: impl Into<String>) -> Self {
+        self.document.website_url = url.into();
+        self
+    }
+
+    pub fn build(self, catalog: Arc<dyn Catalog>) -> Result<Service, ServiceError> {
+        Service::new(self.document, catalog)
     }
 }
 
@@ -523,6 +670,48 @@ mod tests {
 
     fn document() -> ServiceDocument {
         parse_service_document(br#"{"description":"Plants","http":{"endpoint_base":"/odp"},"language":"en","localizations":["en"],"name":"Indica Flowers","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}]}"#).unwrap()
+    }
+
+    #[test]
+    fn builder_derives_version_and_catalog_operations() {
+        let service =
+            ServiceBuilder::new("Indica Flowers", "An AI-enabled plant store.", "en", "/odp")
+                .keywords(["plants", "flowers"])
+                .operation_authentication(
+                    Operation::GetOffering,
+                    AuthenticationRequirement::Required,
+                )
+                .protocols(
+                    vec![EnrollmentProtocol {
+                        name: odp_core::Protocol::Aep,
+                    }],
+                    Vec::new(),
+                )
+                .build(Arc::new(TestCatalog))
+                .unwrap();
+        let document = service.document();
+        assert_eq!(document.odp_version, VERSION);
+        assert_eq!(document.localizations, ["en"]);
+        assert_eq!(document.keywords, ["plants", "flowers"]);
+        assert_eq!(document.operations.len(), 2);
+        assert_eq!(
+            document
+                .operations
+                .iter()
+                .find(|descriptor| descriptor.name == Operation::GetOffering)
+                .unwrap()
+                .authentication,
+            AuthenticationRequirement::Required
+        );
+        assert_eq!(
+            document
+                .operations
+                .iter()
+                .find(|descriptor| descriptor.name == Operation::ListOfferings)
+                .unwrap()
+                .authentication,
+            AuthenticationRequirement::NotRequired
+        );
     }
 
     #[tokio::test]

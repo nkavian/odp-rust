@@ -1072,8 +1072,10 @@ dependencies = [
 name = "odp-examples"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "odp-agent",
  "odp-core",
+ "odp-directory",
  "odp-service",
  "serde",
  "serde_json",

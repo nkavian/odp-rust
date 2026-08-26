@@ -31,18 +31,42 @@ independent of a particular Rust web framework.
 
 ## Installation
 
-Add only the crates required by the integration role:
+An Agent that searches the Directory and navigates Service catalogs uses:
 
 ```toml
 [dependencies]
 odp-agent = "0.1.0"
 odp-core = "0.1.0"
 odp-directory = "0.1.0"
+```
+
+A Service that publishes its own catalog uses:
+
+```toml
+[dependencies]
+odp-core = "0.1.0"
 odp-service = "0.1.0"
 ```
 
-An Agent normally uses `odp-agent`, which brings in Core and Directory. A Service normally uses
-`odp-service`, which brings in Core. The individual crate guides contain executable API examples.
+Declare only the crates whose public types the application names. The individual crate guides
+contain executable API examples.
+
+## Choose an integration path
+
+An Agent normally begins with the canonical Directory, then connects directly to the selected
+Services. [`odp-agent`](./crates/odp-agent) demonstrates federated search, direct Collection and
+Offering navigation, full Offering details, and Action resolution.
+
+A Service implements the required Offering operations through a `Catalog`. Small catalogs can use
+the validated in-memory `StaticCatalog`; larger integrations implement the same framework-neutral
+trait over their existing storage. [`odp-service`](./crates/odp-service) demonstrates both paths.
+
+## Protocol composition
+
+ODP discovers what a Service offers and how an Agent can act on an Offering. A Service Document and
+its Actions can advertise AEP enrollment and MPP or x402 payment requirements, but ODP does not
+create credentials, invoke Actions, or submit payments. The application composes an AEP client and
+the appropriate payment client around the resolved ODP Action target.
 
 ## Protocol behavior
 
@@ -52,7 +76,7 @@ An Agent normally uses `odp-agent`, which brings in Core and Directory. A Servic
   Offerings use separate default cache lifetimes and support HTTP revalidation.
 - Directory and Agent traversal follow opaque `next` references with explicit bounds of 16
   pages and 10,000 resources.
-- Federated Agent discovery searches Services concurrently while yielding results in Directory
+- Federated Agent discovery searches Services concurrently and returns results in Directory
   order. A failure from one Service becomes an issue event instead of discarding other results.
 - The Service crate validates configuration and responses but does not impose a web framework or
   storage model. `StaticCatalog` provides the small-catalog integration path.
