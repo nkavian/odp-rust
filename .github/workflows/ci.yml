@@ -35,6 +35,12 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
 
+      - name: Verify clean consumer
+        if: matrix.rust == '1.85.0'
+        run: make consumer-smoke
+        env:
+          RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+
       - name: Run shared conformance harness
         run: make conformance
         env:

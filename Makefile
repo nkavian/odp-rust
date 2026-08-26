@@ -1,7 +1,10 @@
-.PHONY: conformance docs examples format format-check interoperability lint package test verify
+.PHONY: conformance consumer-smoke docs examples format format-check interoperability lint package test verify
 
 conformance:
 	./scripts/run-conformance.sh
+
+consumer-smoke:
+	./scripts/verify-consumer.sh
 
 docs:
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
