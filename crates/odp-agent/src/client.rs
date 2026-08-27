@@ -816,9 +816,26 @@ fn sha256_hex(data: &[u8]) -> String {
 
 fn validate_collections(page: Page<Collection>) -> Result<Page<Collection>, AgentError> {
     for collection in &page.items {
-        let data = serde_json::to_vec(collection)
+        let mut inherited = collection.clone();
+        if inherited.odp_version.is_empty() {
+            inherited.odp_version.clone_from(&page.odp_version);
+        }
+        let data = serde_json::to_vec(&inherited)
             .map_err(|error| AgentError::InvalidResponse(error.to_string()))?;
         parse_collection(&data)?;
+    }
+    Ok(page)
+}
+
+fn validate_offerings(page: OfferingPage<Offering>) -> Result<OfferingPage<Offering>, AgentError> {
+    for offering in &page.items {
+        let mut inherited = offering.clone();
+        if inherited.odp_version.is_empty() {
+            inherited.odp_version.clone_from(&page.odp_version);
+        }
+        let data = serde_json::to_vec(&inherited)
+            .map_err(|error| AgentError::InvalidResponse(error.to_string()))?;
+        parse_offering(&data)?;
     }
     Ok(page)
 }
@@ -845,7 +862,7 @@ fn validate_collection_page_bytes(data: &[u8]) -> Result<(), AgentError> {
 }
 
 fn validate_offering_page_bytes(data: &[u8]) -> Result<(), AgentError> {
-    parse_offering_search_response(data)?;
+    validate_offerings(parse_offering_search_response(data)?)?;
     Ok(())
 }
 
@@ -1190,5 +1207,27 @@ mod tests {
         assert!(!cacheable("POST", &headers, Duration::from_secs(300)));
         let headers = BTreeMap::from([("cache-control".to_owned(), "max-age=30".to_owned())]);
         assert!(cacheable("POST", &headers, Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn validates_embedded_representations_with_the_page_version() {
+        assert!(
+            validate_collection_page_bytes(
+                br#"{"items":[{"id":"plants","name":"Plants"}],"odp_version":"1.0"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_offering_page_bytes(
+                br#"{"items":[{"id":"plant","name":"Plant"}],"odp_version":"1.0"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_offering_page_bytes(
+                br#"{"items":[{"id":"bad/id","name":"Plant"}],"odp_version":"1.0"}"#
+            )
+            .is_err()
+        );
     }
 }

@@ -6,9 +6,9 @@ use odp_core::{
     EnrollmentProtocol, HttpConfiguration, McpEndpoint, Offering, OfferingPage,
     OfferingSearchRequest, Operation, OperationDescriptor, Page, PaymentProtocol, ProblemDetails,
     Representation, SearchCapabilities, ServiceBranding, ServiceDocument, ServiceOpenApi,
-    ServiceProtocols, VERSION, is_local_resource_identifier, parse_collection,
+    ServiceProtocols, TrustProtocol, VERSION, is_local_resource_identifier, parse_collection,
     parse_collection_search_request, parse_offering, parse_offering_search_request,
-    parse_service_document,
+    parse_offering_search_response, parse_page, parse_service_document,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -253,7 +253,16 @@ impl ServiceBuilder {
         self.document.protocols = Some(ServiceProtocols {
             enrollment,
             payments,
+            trust: Vec::new(),
         });
+        self
+    }
+
+    pub fn trust(mut self, protocols: Vec<TrustProtocol>) -> Self {
+        self.document
+            .protocols
+            .get_or_insert_with(ServiceProtocols::default)
+            .trust = protocols;
         self
     }
 
@@ -376,25 +385,29 @@ impl Service {
         let input = catalog_request(&request)?;
         match (request.method.as_str(), path) {
             ("GET", "/offerings") => {
+                let representation = input.representation;
                 let page = self.catalog.list_offerings(input).await?;
-                validate_offering_page(&page)?;
+                validate_offering_page(&page, false, representation)?;
                 json_response(200, &page, MAXIMUM_RESOURCE_BYTES)
             }
             ("POST", "/offerings/search") => {
                 let query = decode_offering_search(&request)?;
+                let representation = input.representation;
                 let page = self.catalog.search_offerings(query, input).await?;
-                validate_offering_page(&page)?;
+                validate_offering_page(&page, true, representation)?;
                 json_response(200, &page, MAXIMUM_RESOURCE_BYTES)
             }
             ("GET", "/collections") => {
+                let representation = input.representation;
                 let page = self.catalog.list_collections(input).await?;
-                validate_collection_page(&page)?;
+                validate_collection_page(&page, representation)?;
                 json_response(200, &page, MAXIMUM_RESOURCE_BYTES)
             }
             ("POST", "/collections/search") => {
                 let query = decode_collection_search(&request)?;
+                let representation = input.representation;
                 let page = self.catalog.search_collections(query, input).await?;
-                validate_collection_page(&page)?;
+                validate_collection_page(&page, representation)?;
                 json_response(200, &page, MAXIMUM_RESOURCE_BYTES)
             }
             ("GET", _) => self.get_path(path, input).await,
@@ -415,12 +428,14 @@ impl Service {
                     "Offering identifier is invalid",
                 ));
             }
+            let representation = input.representation;
             return match self.catalog.get_offering(id, input).await? {
                 Some(offering) if offering.id == id => {
                     let encoded = serde_json::to_vec(&offering)
                         .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
                     parse_offering(&encoded)
                         .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+                    validate_offering_representation(&offering, representation)?;
                     json_response(200, &offering, MAXIMUM_RESOURCE_BYTES)
                 }
                 Some(_) => Err(ServiceError::InvalidResponse(
@@ -431,16 +446,19 @@ impl Service {
         }
         if let Some(value) = path.strip_prefix("/collections/") {
             if let Some(id) = value.strip_suffix("/offerings") {
+                let representation = input.representation;
                 let page = self.catalog.list_collection_offerings(id, input).await?;
-                validate_offering_page(&page)?;
+                validate_offering_page(&page, false, representation)?;
                 return json_response(200, &page, MAXIMUM_RESOURCE_BYTES);
             }
+            let representation = input.representation;
             return match self.catalog.get_collection(value, input).await? {
                 Some(collection) if collection.id == value => {
                     let encoded = serde_json::to_vec(&collection)
                         .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
                     parse_collection(&encoded)
                         .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+                    validate_collection_representation(&collection, representation)?;
                     json_response(200, &collection, MAXIMUM_RESOURCE_BYTES)
                 }
                 Some(_) => Err(ServiceError::InvalidResponse(
@@ -529,22 +547,81 @@ fn request_error(status: u16, code: &'static str, message: &str) -> ServiceError
     }
 }
 
-fn validate_offering_page(page: &OfferingPage<Offering>) -> Result<(), ServiceError> {
+fn validate_offering_page(
+    page: &OfferingPage<Offering>,
+    search_response: bool,
+    representation: Representation,
+) -> Result<(), ServiceError> {
+    let encoded = serde_json::to_vec(page)
+        .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+    if search_response {
+        parse_offering_search_response(&encoded)
+            .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+    } else {
+        parse_page::<serde_json::Value>(&encoded)
+            .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+    }
     for offering in &page.items {
-        let encoded = serde_json::to_vec(offering)
+        let mut inherited = offering.clone();
+        if inherited.odp_version.is_empty() {
+            inherited.odp_version.clone_from(&page.odp_version);
+        }
+        let encoded = serde_json::to_vec(&inherited)
             .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
         parse_offering(&encoded)
             .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+        validate_offering_representation(offering, representation)?;
     }
     Ok(())
 }
 
-fn validate_collection_page(page: &Page<Collection>) -> Result<(), ServiceError> {
+fn validate_collection_page(
+    page: &Page<Collection>,
+    representation: Representation,
+) -> Result<(), ServiceError> {
+    let encoded = serde_json::to_vec(page)
+        .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+    parse_page::<serde_json::Value>(&encoded)
+        .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
     for collection in &page.items {
-        let encoded = serde_json::to_vec(collection)
+        let mut inherited = collection.clone();
+        if inherited.odp_version.is_empty() {
+            inherited.odp_version.clone_from(&page.odp_version);
+        }
+        let encoded = serde_json::to_vec(&inherited)
             .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
         parse_collection(&encoded)
             .map_err(|error| ServiceError::InvalidResponse(error.to_string()))?;
+        validate_collection_representation(collection, representation)?;
+    }
+    Ok(())
+}
+
+fn validate_offering_representation(
+    offering: &Offering,
+    representation: Representation,
+) -> Result<(), ServiceError> {
+    if representation == Representation::Terse && !offering.actions.is_empty() {
+        return Err(ServiceError::InvalidResponse(
+            "Catalog returned Actions in a Terse Offering".to_owned(),
+        ));
+    }
+    if representation == Representation::Full && !offering.detail_fields.is_empty() {
+        return Err(ServiceError::InvalidResponse(
+            "Catalog returned detail_fields in a Full Offering".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_collection_representation(
+    collection: &Collection,
+    representation: Representation,
+) -> Result<(), ServiceError> {
+    if representation == Representation::Full && !collection.detail_fields.is_empty() {
+        return Err(ServiceError::InvalidResponse(
+            "Catalog returned detail_fields in a Full Collection".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -614,7 +691,10 @@ fn accepts_odp(value: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use odp_core::{AdditionalMembers, HttpConfiguration, parse_service_document};
+    use odp_core::{
+        Action, ActionRelation, AdditionalMembers, HttpActionTarget, HttpConfiguration,
+        parse_collection, parse_service_document,
+    };
 
     struct TestCatalog;
 
@@ -687,6 +767,9 @@ mod tests {
                     }],
                     Vec::new(),
                 )
+                .trust(vec![TrustProtocol {
+                    name: odp_core::Protocol::Tap,
+                }])
                 .build(Arc::new(TestCatalog))
                 .unwrap();
         let document = service.document();
@@ -694,6 +777,12 @@ mod tests {
         assert_eq!(document.localizations, ["en"]);
         assert_eq!(document.keywords, ["plants", "flowers"]);
         assert_eq!(document.operations.len(), 2);
+        assert_eq!(
+            document.protocols.as_ref().unwrap().trust,
+            [TrustProtocol {
+                name: odp_core::Protocol::Tap
+            }]
+        );
         assert_eq!(
             document
                 .operations
@@ -751,5 +840,47 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(error, ServiceError::Request { status: 413, .. }));
+    }
+
+    #[test]
+    fn rejects_invalid_page_envelopes() {
+        let page = OfferingPage {
+            additional: AdditionalMembers::new(),
+            auth_expands: false,
+            items: vec![offering()],
+            next: String::new(),
+            odp_version: String::new(),
+            refinements: Vec::new(),
+        };
+
+        assert!(validate_offering_page(&page, false, Representation::Terse).is_err());
+    }
+
+    #[test]
+    fn rejects_representation_contract_violations() {
+        let mut terse = offering();
+        terse.actions.push(Action {
+            authentication: AuthenticationRequirement::NotRequired,
+            description: String::new(),
+            http: Some(HttpActionTarget {
+                href: "/purchase".to_owned(),
+                method: "POST".to_owned(),
+                request: None,
+                response_content_types: Vec::new(),
+            }),
+            id: "purchase".to_owned(),
+            openapi: None,
+            rel: ActionRelation::Purchase,
+        });
+        assert!(validate_offering_representation(&terse, Representation::Terse).is_err());
+
+        let mut full = offering();
+        full.detail_fields.push("/description".to_owned());
+        assert!(validate_offering_representation(&full, Representation::Full).is_err());
+
+        let mut collection =
+            parse_collection(br#"{"id":"plants","name":"Plants","odp_version":"1.0"}"#).unwrap();
+        collection.detail_fields.push("/description".to_owned());
+        assert!(validate_collection_representation(&collection, Representation::Full).is_err());
     }
 }

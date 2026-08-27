@@ -5,6 +5,7 @@ mod cache;
 mod capabilities;
 mod client;
 mod details;
+mod schema;
 
 pub use agent::*;
 pub use cache::*;

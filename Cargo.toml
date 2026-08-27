@@ -27,6 +27,8 @@ unsafe_code = "forbid"
 async-trait = "0.1.92"
 base64 = "0.23.1"
 futures = "0.3.34"
+getrandom = "0.4.3"
+hmac = "0.13.0"
 httpdate = "1.0.3"
 include_dir = "0.7.4"
 jsonschema = { version = "0.51.0", default-features = false }
