@@ -1154,6 +1154,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inspection_preserves_tap_trust_advertisement() {
+        let document = br#"{"description":"Plants","http":{"endpoint_base":"/odp"},"language":"en","localizations":["en"],"name":"Indica Flowers","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}],"protocols":{"trust":[{"name":"tap"}]}}"#;
+        let client = ServiceClient::with_transport(
+            "https://demo.inflowpay.ai",
+            Arc::new(MockTransport {
+                responses: Mutex::new(VecDeque::from([response(document)])),
+            }),
+        )
+        .unwrap();
+
+        let inspection = client.inspect().await.unwrap();
+        assert_eq!(
+            inspection.document.protocols.unwrap().trust,
+            [odp_core::TrustProtocol {
+                name: odp_core::Protocol::Tap
+            }]
+        );
+    }
+
+    #[tokio::test]
     async fn caches_the_service_document_with_its_resource_fallback() {
         let document = br#"{"description":"Plants","http":{"endpoint_base":"/odp"},"language":"en","localizations":["en"],"name":"Indica Flowers","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}]}"#;
         let client = ServiceClient::with_transport(

@@ -59,6 +59,7 @@ let suggestions = directory
 Search filters cover keywords, ODP operations, enrollment protocols, payment protocols, payment
 options, and their authentication requirements. Search responses can also carry facets for
 building data-driven filters without packaging the Directory's current vocabulary into the Agent.
+Each returned Service preserves its enrollment, payment, and trust protocol advertisements.
 
 See the [workspace guide](../../README.md) and the
 [ODP specification](https://www.offeringprotocol.org/).

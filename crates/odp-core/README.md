@@ -31,6 +31,9 @@ assert_eq!(document.name, "Indica Flowers");
 # Ok::<(), odp_core::ParseError>(())
 ```
 
+`ServiceProtocols::trust` carries generic trust-protocol advertisements. TAP support is represented
+by `TrustProtocol { name: Protocol::Tap }`.
+
 Validation failures retain structured paths and schema keywords so applications can present more
 than a generic parse failure:
 

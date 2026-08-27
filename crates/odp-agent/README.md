@@ -18,6 +18,9 @@ use odp_core::Representation;
 let client = ServiceClient::new("https://demo.inflowpay.ai")?;
 let inspection = client.inspect().await?;
 println!("{}", inspection.document.name);
+if let Some(protocols) = &inspection.document.protocols {
+    println!("Trust protocols: {:?}", protocols.trust);
+}
 
 let offerings = client
     .list_all_offerings(
@@ -101,8 +104,8 @@ search support.
 `get_offering_details` returns normalized, usable Action targets and structured issues separately
 from the Offering. `resolve_action` can resolve a request schema or a unique OpenAPI 3.1 operation,
 but it never invokes the target. The application uses each Action's authentication requirement and
-the Service Document's AEP, MPP, or x402 advertisement to enroll, authenticate, or pay before making
-the resolved HTTP request.
+the Service Document's enrollment, payment, and trust advertisements to compose the necessary
+protocol clients before making the resolved HTTP request.
 
 See the [runnable Agent example](../../examples/odp-agent-discovery) for Directory composition,
 Collection navigation, full Offering details, and Action resolution.
