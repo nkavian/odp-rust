@@ -37,7 +37,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             })
             .collect::<BTreeMap<_, _>>();
         let mut body = Vec::new();
-        incoming.as_reader().read_to_end(&mut body)?;
+        if let Some(length) = incoming.body_length() {
+            body.resize(length, 0);
+            incoming.as_reader().read_exact(&mut body)?;
+        }
         let response = runtime.block_on(service.handle(Request {
             body,
             headers,
