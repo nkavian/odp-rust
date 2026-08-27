@@ -327,7 +327,7 @@ mod tests {
         async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
             self.requests.lock().unwrap().push(request);
             Ok(HttpResponse {
-                body: br#"{"items":[{"description":"Plants","indexed_at":"2026-08-25T00:00:00Z","language":"en","localizations":["en"],"name":"Indica Flowers","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}],"service_origin":"https://demo.inflowpay.ai"}]}"#.to_vec(),
+                body: br#"{"items":[{"description":"Plants","indexed_at":"2026-08-25T00:00:00Z","language":"en","localizations":["en"],"name":"Indica Flowers","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}],"protocols":{"trust":[{"name":"tap"}]},"service_origin":"https://demo.inflowpay.ai"}]}"#.to_vec(),
                 headers: BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]),
                 status: 200,
             })
@@ -348,6 +348,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(page.items[0].name, "Indica Flowers");
+        assert_eq!(
+            page.items[0].protocols.as_ref().unwrap().trust,
+            [odp_core::TrustProtocol {
+                name: odp_core::Protocol::Tap
+            }]
+        );
         let requests = transport.requests.lock().unwrap();
         assert_eq!(
             requests[0].url,

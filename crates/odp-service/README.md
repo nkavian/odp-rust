@@ -13,7 +13,7 @@ continuations protected against tampering.
 ```rust,no_run
 use std::sync::Arc;
 
-use odp_core::parse_offering;
+use odp_core::{Protocol, TrustProtocol, parse_offering};
 use odp_service::{ServiceBuilder, StaticCatalog, StaticCatalogOptions};
 
 let offering = parse_offering(
@@ -30,6 +30,9 @@ let service = ServiceBuilder::new(
     "/odp",
 )
 .keywords(["plants", "flowers"])
+.trust(vec![TrustProtocol {
+    name: Protocol::Tap,
+}])
 .build(Arc::new(catalog))?;
 assert_eq!(service.document().name, "Indica Flowers");
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -39,7 +42,8 @@ assert_eq!(service.document().name, "Indica Flowers");
 language, and derives advertised operations from the `Catalog`. Use
 `operation_authentication` when a catalog operation requires or optionally accepts authentication.
 ODP validation also requires the builder's `protocols` metadata to advertise enrollment whenever
-an operation accepts or requires authentication.
+an operation accepts or requires authentication. Use `trust` to advertise supported trust
+protocols; the host application remains responsible for their implementation.
 
 ## Catalog contract
 

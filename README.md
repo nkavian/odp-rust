@@ -64,9 +64,9 @@ trait over their existing storage. [`odp-service`](./crates/odp-service) demonst
 ## Protocol composition
 
 ODP discovers what a Service offers and how an Agent can act on an Offering. A Service Document and
-its Actions can advertise AEP enrollment and MPP or x402 payment requirements, but ODP does not
-create credentials, invoke Actions, or submit payments. The application composes an AEP client and
-the appropriate payment client around the resolved ODP Action target.
+its Actions can advertise AEP enrollment, MPP or x402 payment requirements, and TAP trust support,
+but ODP does not create credentials, invoke Actions, submit payments, or implement trust protocols.
+The application composes the appropriate protocol clients around the resolved ODP Action target.
 
 ## Protocol behavior
 
