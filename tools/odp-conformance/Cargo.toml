@@ -25,3 +25,7 @@ path = "src/bin/odp_conformance_adapter.rs"
 [[bin]]
 name = "odp-node-interop"
 path = "src/bin/odp_node_interop.rs"
+
+[[bin]]
+name = "odp-interoperability-agent"
+path = "src/bin/odp_interoperability_agent.rs"
