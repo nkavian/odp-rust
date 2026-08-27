@@ -46,7 +46,7 @@ string_enum!(AuthenticationRequirement {
     Optional => "optional",
     Required => "required",
 });
-string_enum!(Protocol { Aep => "aep", Mpp => "mpp", X402 => "x402" });
+string_enum!(Protocol { Aep => "aep", Mpp => "mpp", Tap => "tap", X402 => "x402" });
 string_enum!(PaymentOption {
     Algorand => "algorand",
     Aptos => "aptos",
@@ -111,6 +111,8 @@ pub struct ServiceProtocols {
     pub enrollment: Vec<EnrollmentProtocol>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub payments: Vec<PaymentProtocol>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trust: Vec<TrustProtocol>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -124,6 +126,11 @@ pub struct PaymentProtocol {
     pub name: Protocol,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<PaymentOption>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TrustProtocol {
+    pub name: Protocol,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

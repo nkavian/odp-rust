@@ -6,10 +6,9 @@ use odp_core::{
 use serde_json::Value;
 use url::Url;
 
-use crate::{AgentError, ServiceClient};
+use crate::{AgentError, ServiceClient, schema::resolve_schema};
 
 const MAXIMUM_OPENAPI_BYTES: usize = 1_048_576;
-const MAXIMUM_SCHEMA_BYTES: usize = 524_288;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OfferingIssueScope {
@@ -81,9 +80,7 @@ impl ServiceClient {
         let mut attribute_schema = None;
         if let Some(reference) = &offering.schema {
             match resolve_https_reference(&reference.url, self.service_origin()) {
-                Ok(target) => match self
-                    .resolve_schema(&target, Some(&offering.attributes))
-                    .await
+                Ok(target) => match resolve_schema(self, &target, Some(&offering.attributes)).await
                 {
                     Ok((schema, valid)) => {
                         if valid == Some(false) {
@@ -152,7 +149,7 @@ impl ServiceClient {
                 .and_then(|value| value.schema.as_ref())
             {
                 let target = resolve_https_reference(&reference.url, self.service_origin())?;
-                result.request_schema = Some(self.resolve_schema(&target, None).await?.0);
+                result.request_schema = Some(resolve_schema(self, &target, None).await?.0);
             }
             return Ok(result);
         }
@@ -165,30 +162,6 @@ impl ServiceClient {
         result.openapi_document = Some(document);
         result.operation = Some(operation);
         Ok(result)
-    }
-
-    async fn resolve_schema(
-        &self,
-        target: &str,
-        attributes: Option<&BTreeMap<String, Value>>,
-    ) -> Result<(Value, Option<bool>), AgentError> {
-        let schema = self
-            .supporting_json(
-                target,
-                "schema",
-                "application/schema+json, application/json;q=0.9",
-                &["application/schema+json", "application/json"],
-                MAXIMUM_SCHEMA_BYTES,
-            )
-            .await?;
-        let validator = jsonschema::validator_for(&schema)
-            .map_err(|error| AgentError::InvalidResponse(error.to_string()))?;
-        let valid = attributes.map(|attributes| {
-            serde_json::to_value(attributes)
-                .map(|value| validator.is_valid(&value))
-                .unwrap_or(false)
-        });
-        Ok((schema, valid))
     }
 
     async fn resolve_openapi(

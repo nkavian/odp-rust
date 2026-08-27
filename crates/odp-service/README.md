@@ -8,7 +8,7 @@ surface remains independent of Axum, Actix Web, and other application frameworks
 
 Implement `Catalog` for a database-backed or remote catalog. Small Services can use `StaticCatalog`,
 which validates all resources during construction and supplies bounded, expiring, stateless
-continuations.
+continuations protected against tampering.
 
 ```rust,no_run
 use std::sync::Arc;
@@ -59,7 +59,8 @@ The `CatalogRequest` provides the requested representation, page limit, continua
 language preference, and canonical request path. A storage-backed implementation applies those
 values in its own query layer and returns typed ODP pages. `StaticCatalog` instead validates all
 resources during construction, defaults pages to 50 resources, and issues stateless continuations
-that expire after one hour. The Service request boundary caps every requested page at 100 resources.
+protected against tampering. They expire after one hour. The Service request boundary caps every
+requested page at 100 resources.
 
 The storage boundary can wrap an existing asynchronous repository without coupling ODP to its
 database:

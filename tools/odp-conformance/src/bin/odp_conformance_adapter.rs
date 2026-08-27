@@ -1,6 +1,14 @@
-use std::{collections::BTreeMap, io::BufRead, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    io::BufRead,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use async_trait::async_trait;
+use odp_agent::{OfferingIssueScope, ServiceClient};
 use odp_core::{
     Offering, OfferingPage, OfferingSearchRequest, Operation, ResourceIdentity, VERSION,
     derive_service_origin, is_local_resource_identifier, parse_collection,
@@ -8,6 +16,7 @@ use odp_core::{
     parse_offering_search_request, parse_page, parse_problem_response, parse_service_document,
     parse_sort_definition, resolve_continuation, resolve_resource_reference,
 };
+use odp_directory::{HttpRequest, HttpResponse, Transport, TransportError};
 use odp_service::{Catalog, CatalogRequest, MEDIA_TYPE, Request, Service, ServiceError};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -123,6 +132,7 @@ async fn evaluate_case(
             parse_result(case, "request", parse_offering_search_request)
         }
         "offering-search-contract" => Ok(None),
+        "attribute-schema-retrieval" => evaluate_attribute_schema(case).await,
         "filter-sort-contract" if operation(case) == "validate-definition" => {
             parse_result(case, "definition", parse_filter_definition)
         }
@@ -137,6 +147,232 @@ async fn evaluate_case(
         "role-baseline" => evaluate_baseline(case, role),
         _ => Ok(None),
     }
+}
+
+#[derive(Clone)]
+struct SchemaResponse {
+    body: Vec<u8>,
+    content_type: String,
+    status: u16,
+}
+
+struct ServiceTransport {
+    offering: Vec<u8>,
+    terse: bool,
+}
+
+#[async_trait]
+impl Transport for ServiceTransport {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+        let body = if request.url.ends_with("/.well-known/odp") {
+            br#"{"description":"ODP Rust conformance adapter","http":{"endpoint_base":"/odp"},"language":"en","localizations":["en"],"name":"Conformance Service","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}]}"#.to_vec()
+        } else if self.terse {
+            br#"{"items":[{"id":"item","name":"Item"}],"odp_version":"1.0"}"#.to_vec()
+        } else {
+            self.offering.clone()
+        };
+        Ok(HttpResponse {
+            body,
+            headers: BTreeMap::from([(
+                "content-type".to_owned(),
+                "application/odp+json".to_owned(),
+            )]),
+            status: 200,
+        })
+    }
+}
+
+struct SupportingTransport {
+    calls: AtomicUsize,
+    documents: BTreeMap<String, SchemaResponse>,
+}
+
+#[async_trait]
+impl Transport for SupportingTransport {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let response = self
+            .documents
+            .get(&request.url)
+            .cloned()
+            .unwrap_or_else(|| SchemaResponse {
+                body: br#"{"title":"Not Found"}"#.to_vec(),
+                content_type: "application/problem+json".to_owned(),
+                status: 404,
+            });
+        Ok(HttpResponse {
+            body: response.body,
+            headers: BTreeMap::from([("content-type".to_owned(), response.content_type)]),
+            status: response.status,
+        })
+    }
+}
+
+async fn evaluate_attribute_schema(case: &BTreeMap<String, Value>) -> Result<Option<bool>, String> {
+    let valid = field::<bool>(case, "valid").unwrap_or(false);
+    match operation(case).as_str() {
+        "validate-reference" => {
+            let offering = serde_json::to_vec(&json!({
+                "id": "item",
+                "name": "Item",
+                "odp_version": VERSION,
+                "schema": case.get("reference").ok_or("case omitted reference")?
+            }))
+            .map_err(|error| error.to_string())?;
+            Ok(Some(parse_offering(&offering).is_ok() == valid))
+        }
+        "validate-response" => {
+            let response = SchemaResponse {
+                body: raw(case, "document")?,
+                content_type: required(case, "content_type")?,
+                status: required(case, "status")?,
+            };
+            let (details, _) = attribute_schema_details(
+                BTreeMap::from([("https://schemas.example/root.json".to_owned(), response)]),
+                "https://schemas.example/root.json",
+                json!({"name": "root"}),
+                false,
+            )
+            .await?;
+            Ok(Some(details.attribute_schema.is_some() == valid))
+        }
+        "validate-schema-reference-profile" => {
+            let documents: Vec<Value> = required(case, "documents")?;
+            let mut responses = BTreeMap::new();
+            let mut root_url = String::new();
+            for (index, document) in documents.into_iter().enumerate() {
+                let url = document
+                    .get("$id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("https://schemas.example/document-{index}.json"));
+                if root_url.is_empty() {
+                    root_url.clone_from(&url);
+                }
+                responses.insert(
+                    url,
+                    SchemaResponse {
+                        body: serde_json::to_vec(&document).map_err(|error| error.to_string())?,
+                        content_type: "application/schema+json".to_owned(),
+                        status: 200,
+                    },
+                );
+            }
+            let (details, _) = attribute_schema_details(
+                responses,
+                &root_url,
+                json!({"children": [{"name": "child"}], "name": "root"}),
+                false,
+            )
+            .await?;
+            Ok(Some(details.attribute_schema.is_some() == valid))
+        }
+        "validation-scope" => {
+            let representation: String = required(case, "representation")?;
+            let expected: bool = required(case, "complete_instance_validation")?;
+            let terse = representation == "terse";
+            let (details, requests) = attribute_schema_details(
+                BTreeMap::from([(
+                    "https://schemas.example/root.json".to_owned(),
+                    SchemaResponse {
+                        body: br#"{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"memory":{"type":"number"}},"type":"object"}"#.to_vec(),
+                        content_type: "application/schema+json".to_owned(),
+                        status: 200,
+                    },
+                )]),
+                "https://schemas.example/root.json",
+                json!({"memory": "invalid"}),
+                terse,
+            )
+            .await?;
+            let complete = requests > 0
+                && details.offering.attributes.is_empty()
+                && details
+                    .issues
+                    .iter()
+                    .any(|issue| issue.scope == OfferingIssueScope::Attributes);
+            Ok(Some(complete == expected))
+        }
+        "failure-scope" => {
+            let expected: BTreeMap<String, bool> = required(case, "expected")?;
+            let (details, _) = attribute_schema_details(
+                BTreeMap::from([(
+                    "https://schemas.example/root.json".to_owned(),
+                    SchemaResponse {
+                        body: br#"{"title":"Unavailable"}"#.to_vec(),
+                        content_type: "application/problem+json".to_owned(),
+                        status: 503,
+                    },
+                )]),
+                "https://schemas.example/root.json",
+                json!({"name": "root"}),
+                false,
+            )
+            .await?;
+            let actual = BTreeMap::from([
+                ("offering_usable".to_owned(), details.offering.id == "item"),
+                (
+                    "attributes_usable".to_owned(),
+                    !details.offering.attributes.is_empty(),
+                ),
+                (
+                    "report_issue".to_owned(),
+                    details
+                        .issues
+                        .iter()
+                        .any(|issue| issue.scope == OfferingIssueScope::AttributeSchema),
+                ),
+            ]);
+            Ok(Some(actual == expected))
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn attribute_schema_details(
+    documents: BTreeMap<String, SchemaResponse>,
+    root_url: &str,
+    attributes: Value,
+    terse: bool,
+) -> Result<(odp_agent::OfferingDetails, usize), String> {
+    let offering = serde_json::to_vec(&json!({
+        "attributes": attributes,
+        "id": "item",
+        "name": "Item",
+        "odp_version": VERSION,
+        "schema": {"url": root_url}
+    }))
+    .map_err(|error| error.to_string())?;
+    let service_transport = Arc::new(ServiceTransport { offering, terse });
+    let supporting_transport = Arc::new(SupportingTransport {
+        calls: AtomicUsize::new(0),
+        documents,
+    });
+    let client = ServiceClient::with_transport("https://service.example", service_transport)
+        .map_err(|error| error.to_string())?
+        .with_supporting_transport(supporting_transport.clone());
+    let details = if terse {
+        let offering = client
+            .list_offerings(odp_core::Representation::Terse, 1)
+            .await
+            .map_err(|error| error.to_string())?
+            .items
+            .into_iter()
+            .next()
+            .ok_or("terse conformance response omitted its Offering")?;
+        odp_agent::OfferingDetails {
+            actions: Vec::new(),
+            attribute_schema: None,
+            issues: Vec::new(),
+            offering,
+        }
+    } else {
+        client
+            .get_offering_details("item")
+            .await
+            .map_err(|error| error.to_string())?
+    };
+    Ok((details, supporting_transport.calls.load(Ordering::Relaxed)))
 }
 
 fn evaluate_pagination(case: &BTreeMap<String, Value>) -> Result<Option<bool>, String> {

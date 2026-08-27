@@ -459,6 +459,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_tap_trust_protocol_support() {
+        let document = br#"{
+            "description":"Plant store",
+            "http":{"endpoint_base":"/odp"},
+            "language":"en",
+            "localizations":["en"],
+            "name":"Plants",
+            "odp_version":"1.0",
+            "operations":[
+                {"authentication":"not-required","name":"get-offering"},
+                {"authentication":"not-required","name":"list-offerings"}
+            ],
+            "protocols":{"trust":[{"name":"tap"}]}
+        }"#;
+        let parsed = parse_service_document(document).unwrap();
+        assert_eq!(
+            parsed.protocols.unwrap().trust,
+            [crate::TrustProtocol {
+                name: crate::Protocol::Tap
+            }]
+        );
+    }
+
+    #[test]
     fn returns_structured_validation_issues() {
         let error = parse_service_document(br#"{}"#).unwrap_err();
         let ParseError::Validation(error) = error else {

@@ -5,8 +5,10 @@ use std::{
 
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use hmac::{Hmac, KeyInit, Mac};
 use odp_core::{Collection, Offering, OfferingPage, Operation, Page, VERSION};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use url::form_urlencoded;
 
 use crate::{Catalog, CatalogRequest, ServiceError};
@@ -25,10 +27,17 @@ pub struct StaticCatalog {
     collection_by_id: BTreeMap<String, Collection>,
     offerings: Vec<Offering>,
     offering_by_id: BTreeMap<String, Offering>,
+    continuation_key: [u8; 32],
 }
 
 impl StaticCatalog {
     pub fn new(options: StaticCatalogOptions) -> Result<Self, ServiceError> {
+        let mut continuation_key = [0_u8; 32];
+        getrandom::fill(&mut continuation_key).map_err(|error| {
+            ServiceError::InvalidConfiguration(format!(
+                "Unable to create the continuation signing key: {error}"
+            ))
+        })?;
         let mut offering_by_id = BTreeMap::new();
         for offering in &options.offerings {
             validate_offering(offering)?;
@@ -70,6 +79,7 @@ impl StaticCatalog {
             collection_by_id,
             offerings: options.offerings,
             offering_by_id,
+            continuation_key,
         })
     }
 }
@@ -92,7 +102,9 @@ impl Catalog for StaticCatalog {
         &self,
         request: CatalogRequest,
     ) -> Result<OfferingPage<Offering>, ServiceError> {
-        let (items, next) = page(&self.offerings, &request)?;
+        let (items, next) = page(&self.offerings, &request, &self.continuation_key, |value| {
+            offering_representation(value, request.representation, true)
+        })?;
         Ok(OfferingPage {
             additional: BTreeMap::new(),
             auth_expands: false,
@@ -106,16 +118,25 @@ impl Catalog for StaticCatalog {
     async fn get_offering(
         &self,
         id: &str,
-        _request: CatalogRequest,
+        request: CatalogRequest,
     ) -> Result<Option<Offering>, ServiceError> {
-        Ok(self.offering_by_id.get(id).cloned())
+        Ok(self
+            .offering_by_id
+            .get(id)
+            .cloned()
+            .map(|value| offering_representation(value, request.representation, false)))
     }
 
     async fn list_collections(
         &self,
         request: CatalogRequest,
     ) -> Result<Page<Collection>, ServiceError> {
-        let (items, next) = page(&self.collections, &request)?;
+        let (items, next) = page(
+            &self.collections,
+            &request,
+            &self.continuation_key,
+            |value| collection_representation(value, request.representation, true),
+        )?;
         Ok(Page {
             additional: BTreeMap::new(),
             auth_expands: false,
@@ -128,9 +149,13 @@ impl Catalog for StaticCatalog {
     async fn get_collection(
         &self,
         id: &str,
-        _request: CatalogRequest,
+        request: CatalogRequest,
     ) -> Result<Option<Collection>, ServiceError> {
-        Ok(self.collection_by_id.get(id).cloned())
+        Ok(self
+            .collection_by_id
+            .get(id)
+            .cloned()
+            .map(|value| collection_representation(value, request.representation, false)))
     }
 
     async fn list_collection_offerings(
@@ -151,7 +176,9 @@ impl Catalog for StaticCatalog {
             .filter(|offering| offering.collection_ids.iter().any(|id| id == collection_id))
             .cloned()
             .collect::<Vec<_>>();
-        let (items, next) = page(&offerings, &request)?;
+        let (items, next) = page(&offerings, &request, &self.continuation_key, |value| {
+            offering_representation(value, request.representation, true)
+        })?;
         Ok(OfferingPage {
             additional: BTreeMap::new(),
             auth_expands: false,
@@ -175,29 +202,64 @@ struct Cursor {
 fn page<T: Clone>(
     values: &[T],
     request: &CatalogRequest,
+    continuation_key: &[u8; 32],
+    represent: impl Fn(T) -> T,
 ) -> Result<(Vec<T>, String), ServiceError> {
     let limit = if request.limit == 0 {
         DEFAULT_PAGE_LIMIT
     } else {
         request.limit
     };
-    let offset = decode_cursor(request, limit)?;
+    let offset = decode_cursor(request, limit, continuation_key)?;
     if offset > values.len() {
         return Err(invalid_cursor());
     }
     let end = (offset + limit).min(values.len());
     let next = if end < values.len() {
-        encode_cursor(request, limit, end)?
+        encode_cursor(request, limit, end, continuation_key)?
     } else {
         String::new()
     };
-    Ok((values[offset..end].to_vec(), next))
+    Ok((
+        values[offset..end].iter().cloned().map(represent).collect(),
+        next,
+    ))
+}
+
+fn offering_representation(
+    mut value: Offering,
+    representation: odp_core::Representation,
+    embedded: bool,
+) -> Offering {
+    if representation == odp_core::Representation::Terse {
+        value.actions.clear();
+        value.detail_fields.clear();
+    }
+    if embedded && representation == odp_core::Representation::Terse {
+        value.odp_version.clear();
+    }
+    value
+}
+
+fn collection_representation(
+    mut value: Collection,
+    representation: odp_core::Representation,
+    embedded: bool,
+) -> Collection {
+    if representation == odp_core::Representation::Terse {
+        value.detail_fields.clear();
+    }
+    if embedded && representation == odp_core::Representation::Terse {
+        value.odp_version.clear();
+    }
+    value
 }
 
 fn encode_cursor(
     request: &CatalogRequest,
     limit: usize,
     offset: usize,
+    continuation_key: &[u8; 32],
 ) -> Result<String, ServiceError> {
     let expires = SystemTime::now()
         .checked_add(CONTINUATION_LIFETIME)
@@ -213,7 +275,12 @@ fn encode_cursor(
     };
     let data =
         serde_json::to_vec(&value).map_err(|error| ServiceError::Catalog(error.to_string()))?;
-    let cursor = URL_SAFE_NO_PAD.encode(data);
+    let payload = URL_SAFE_NO_PAD.encode(data);
+    let mut mac = Hmac::<Sha256>::new_from_slice(continuation_key)
+        .map_err(|error| ServiceError::Catalog(error.to_string()))?;
+    mac.update(payload.as_bytes());
+    let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    let cursor = format!("{payload}.{signature}");
     let query = form_urlencoded::Serializer::new(String::new())
         .append_pair("cursor", &cursor)
         .append_pair("limit", &limit.to_string())
@@ -222,12 +289,23 @@ fn encode_cursor(
     Ok(format!("{}?{query}", request.path))
 }
 
-fn decode_cursor(request: &CatalogRequest, limit: usize) -> Result<usize, ServiceError> {
+fn decode_cursor(
+    request: &CatalogRequest,
+    limit: usize,
+    continuation_key: &[u8; 32],
+) -> Result<usize, ServiceError> {
     let Some(cursor) = &request.cursor else {
         return Ok(0);
     };
+    let (payload, encoded_signature) = cursor.split_once('.').ok_or_else(invalid_cursor)?;
+    let signature = URL_SAFE_NO_PAD
+        .decode(encoded_signature)
+        .map_err(|_| invalid_cursor())?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(continuation_key).map_err(|_| invalid_cursor())?;
+    mac.update(payload.as_bytes());
+    mac.verify_slice(&signature).map_err(|_| invalid_cursor())?;
     let data = URL_SAFE_NO_PAD
-        .decode(cursor)
+        .decode(payload)
         .map_err(|_| invalid_cursor())?;
     let value = serde_json::from_slice::<Cursor>(&data).map_err(|_| invalid_cursor())?;
     let now = SystemTime::now()
@@ -283,7 +361,10 @@ mod tests {
 
     fn offering(id: &str) -> Offering {
         parse_offering(
-            format!(r#"{{"id":"{id}","name":"Plant {id}","odp_version":"1.0"}}"#).as_bytes(),
+            format!(
+                r#"{{"actions":[{{"authentication":"not-required","http":{{"href":"/actions/{id}","method":"GET"}},"id":"view","rel":"invoke"}}],"id":"{id}","name":"Plant {id}","odp_version":"1.0"}}"#
+            )
+            .as_bytes(),
         )
         .unwrap()
     }
@@ -304,12 +385,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first.items[0].id, "one");
+        assert!(first.items[0].actions.is_empty());
+        assert!(first.items[0].odp_version.is_empty());
         let cursor = form_urlencoded::parse(first.next.split_once('?').unwrap().1.as_bytes())
             .find_map(|(name, value)| (name == "cursor").then(|| value.into_owned()))
             .unwrap();
         let second = catalog
             .list_offerings(CatalogRequest {
-                cursor: Some(cursor),
+                cursor: Some(cursor.clone()),
                 limit: 1,
                 path: "/odp/offerings".to_owned(),
                 ..CatalogRequest::default()
@@ -318,5 +401,34 @@ mod tests {
             .unwrap();
         assert_eq!(second.items[0].id, "two");
         assert!(second.next.is_empty());
+        assert!(
+            catalog
+                .list_offerings(CatalogRequest {
+                    cursor: Some(format!("{cursor}A")),
+                    limit: 1,
+                    path: "/odp/offerings".to_owned(),
+                    ..CatalogRequest::default()
+                })
+                .await
+                .is_err()
+        );
+
+        let detail = catalog
+            .get_offering("one", CatalogRequest::default())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(detail.actions.is_empty());
+        assert_eq!(detail.odp_version, VERSION);
+
+        let full = catalog
+            .list_offerings(CatalogRequest {
+                representation: odp_core::Representation::Full,
+                ..CatalogRequest::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(full.items[0].actions.len(), 1);
+        assert_eq!(full.items[0].odp_version, VERSION);
     }
 }

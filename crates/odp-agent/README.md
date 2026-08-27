@@ -46,7 +46,10 @@ Offering fallback lifetimes.
 `get_offering_details` bundles an Offering with its validated Attribute Schema, validates the
 Offering attributes, and normalizes usable Action targets. `resolve_action` resolves an Action's
 request schema or unique OpenAPI 3.1 operation without invoking the target. Supporting documents
-are fetched anonymously over HTTPS with independent byte limits and cache entries.
+are fetched anonymously over HTTPS with independent byte limits and cache entries. Attribute Schema
+resolution accepts JSON Schema Draft 2020-12, loads at most 16 documents through eight reference
+levels, and limits the complete graph to one mebibyte. Cross-document schema composition uses
+`$ref`; `$dynamicRef` accepts only a fragment reference such as `#node`.
 
 ## Search across Services
 
