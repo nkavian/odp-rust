@@ -10,11 +10,13 @@ use std::{
 use async_trait::async_trait;
 use odp_agent::{OfferingIssueScope, ServiceClient};
 use odp_core::{
-    Offering, OfferingPage, OfferingSearchRequest, Operation, ResourceIdentity, VERSION,
-    derive_service_origin, is_local_resource_identifier, parse_collection,
-    parse_collection_search_request, parse_filter_definition, parse_offering,
-    parse_offering_search_request, parse_page, parse_problem_response, parse_service_document,
-    parse_sort_definition, resolve_continuation, resolve_resource_reference,
+    Collection, Offering, OfferingPage, OfferingSearchRequest, Operation, ResourceIdentity,
+    VERSION, derive_service_origin, is_local_resource_identifier, normalize_agent_response,
+    parse_agent_service_document, parse_collection, parse_collection_search_request,
+    parse_filter_definition, parse_filter_definition_page, parse_offering,
+    parse_offering_search_request, parse_page, parse_problem_details, parse_problem_response,
+    parse_service_document, parse_sort_definition, parse_sort_definition_page,
+    resolve_continuation, resolve_resource_reference,
 };
 use odp_directory::{HttpRequest, HttpResponse, Transport, TransportError};
 use odp_service::{Catalog, CatalogRequest, MEDIA_TYPE, Request, Service, ServiceError};
@@ -128,6 +130,7 @@ async fn evaluate_case(
             parse_result(case, "request", parse_collection_search_request)
         }
         "collection-search-contract" => Ok(None),
+        "composition-contract" => evaluate_composition(case, role),
         "offering-search-contract" if operation(case) == "validate-request" => {
             parse_result(case, "request", parse_offering_search_request)
         }
@@ -147,6 +150,79 @@ async fn evaluate_case(
         "role-baseline" => evaluate_baseline(case, role),
         _ => Ok(None),
     }
+}
+
+fn evaluate_composition(
+    case: &BTreeMap<String, Value>,
+    role: &str,
+) -> Result<Option<bool>, String> {
+    match operation(case).as_str() {
+        "normalize-agent-response" if role == "agent" => {
+            let document: Value = required(case, "document")?;
+            let kind: String = required(case, "kind")?;
+            let expected: Value = required(case, "expected")?;
+            let encoded = serde_json::to_vec(&document).map_err(|error| error.to_string())?;
+            let actual =
+                normalize_agent_response(&encoded, &kind).map_err(|error| error.to_string())?;
+            validate_agent_response(&actual, &kind)?;
+            let actual: Value =
+                serde_json::from_slice(&actual).map_err(|error| error.to_string())?;
+            Ok(Some(actual == expected))
+        }
+        "validate-advertisement" => {
+            let protocols: Value = required(case, "protocols")?;
+            let document = service_document_with_protocols(protocols);
+            let encoded = serde_json::to_vec(&document).map_err(|error| error.to_string())?;
+            Ok(Some(
+                parse_service_document(&encoded).is_ok()
+                    == field::<bool>(case, "valid").unwrap_or(false),
+            ))
+        }
+        "filter-advertisement" if role == "agent" => {
+            let protocols: Value = required(case, "protocols")?;
+            let expected: Value = required(case, "expected")?;
+            let document = service_document_with_protocols(protocols);
+            let encoded = serde_json::to_vec(&document).map_err(|error| error.to_string())?;
+            let parsed =
+                parse_agent_service_document(&encoded).map_err(|error| error.to_string())?;
+            let actual = parsed
+                .protocols
+                .map_or_else(|| json!({}), |value| json!(value));
+            Ok(Some(actual == expected))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn validate_agent_response(document: &[u8], kind: &str) -> Result<(), String> {
+    match kind {
+        "service-document" => parse_agent_service_document(document).map(|_| ()),
+        "collection" => parse_collection(document).map(|_| ()),
+        "offering" => parse_offering(document).map(|_| ()),
+        "collection-page" => parse_page::<Collection>(document).map(|_| ()),
+        "offering-page" => parse_page::<Offering>(document).map(|_| ()),
+        "filter-page" => parse_filter_definition_page(document).map(|_| ()),
+        "sort-page" => parse_sort_definition_page(document).map(|_| ()),
+        "problem" => parse_problem_details(document).map(|_| ()),
+        _ => return Err("Unknown Agent response kind".to_owned()),
+    }
+    .map_err(|error| error.to_string())
+}
+
+fn service_document_with_protocols(protocols: Value) -> Value {
+    json!({
+        "description": "ODP Rust conformance adapter",
+        "http": {"endpoint_base": "/odp"},
+        "language": "en",
+        "localizations": ["en"],
+        "name": "Conformance Service",
+        "odp_version": "1.0",
+        "operations": [
+            {"authentication": "not-required", "name": "get-offering"},
+            {"authentication": "not-required", "name": "list-offerings"}
+        ],
+        "protocols": protocols
+    })
 }
 
 #[derive(Clone)]

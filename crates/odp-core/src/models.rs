@@ -24,13 +24,47 @@ string_enum!(PriceType {
     Range => "range",
     StartingAt => "starting_at",
 });
-string_enum!(ActionRelation {
-    Download => "download",
-    Invoke => "invoke",
-    Purchase => "purchase",
-    Quote => "quote",
-    Reserve => "reserve",
-});
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum ActionRelation {
+    Download,
+    Invoke,
+    Purchase,
+    Quote,
+    Reserve,
+    Other(String),
+}
+
+impl<'de> Deserialize<'de> for ActionRelation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "download" => Self::Download,
+            "invoke" => Self::Invoke,
+            "purchase" => Self::Purchase,
+            "quote" => Self::Quote,
+            "reserve" => Self::Reserve,
+            other => Self::Other(other.to_owned()),
+        })
+    }
+}
+
+impl Serialize for ActionRelation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Download => serializer.serialize_str("download"),
+            Self::Invoke => serializer.serialize_str("invoke"),
+            Self::Purchase => serializer.serialize_str("purchase"),
+            Self::Quote => serializer.serialize_str("quote"),
+            Self::Reserve => serializer.serialize_str("reserve"),
+            Self::Other(value) => serializer.serialize_str(value),
+        }
+    }
+}
 string_enum!(ResourceType { Collection => "collection", Offering => "offering" });
 string_enum!(Operation {
     GetCollection => "get-collection",

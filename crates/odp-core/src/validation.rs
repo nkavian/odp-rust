@@ -52,6 +52,485 @@ pub fn parse_service_document(data: &[u8]) -> Result<ServiceDocument, ParseError
     )
 }
 
+pub fn parse_agent_service_document(data: &[u8]) -> Result<ServiceDocument, ParseError> {
+    let encoded = normalize_agent_response(data, "service-document")?;
+    parse_service_document(&encoded)
+}
+
+pub fn normalize_agent_response(data: &[u8], kind: &str) -> Result<Vec<u8>, ParseError> {
+    let mut raw = serde_json::from_slice::<Value>(data).map_err(|error| ValidationError {
+        document_type: "Agent response".to_owned(),
+        issues: vec![issue("", "json", &error.to_string())],
+    })?;
+    normalize_agent_document(&mut raw, kind);
+    serde_json::to_vec(&raw)
+        .map_err(|error| ValidationError {
+            document_type: "Agent response".to_owned(),
+            issues: vec![issue("", "json", &error.to_string())],
+        })
+        .map_err(ParseError::from)
+}
+
+fn normalize_agent_document(document: &mut Value, kind: &str) {
+    match kind {
+        "service-document" => {
+            filter_agent_protocols(document);
+            if let Some(protocols) = document.get_mut("protocols") {
+                filter_unknown_authentication(protocols, "payments");
+            }
+            filter_list(
+                document,
+                "operations",
+                "name",
+                &[
+                    "get-collection",
+                    "get-offering",
+                    "list-collection-offerings",
+                    "list-collections",
+                    "list-offerings",
+                    "search-collections",
+                    "search-offerings",
+                ],
+            );
+            filter_unknown_authentication(document, "operations");
+            filter_list(document, "mcp", "type", &["streamable-http"]);
+            filter_closed_object_list(document, "operations", &["authentication", "name"]);
+            filter_closed_object_list(document, "mcp", &["description", "name", "type", "url"]);
+            filter_payment_options(document);
+            normalize_branding(document);
+            normalize_search_capabilities(document);
+        }
+        "collection" | "offering" => {
+            filter_list(
+                document,
+                "images",
+                "type",
+                &[
+                    "image/avif",
+                    "image/jpeg",
+                    "image/png",
+                    "image/svg+xml",
+                    "image/webp",
+                ],
+            );
+            strip_object_list(
+                document,
+                "images",
+                &["alt", "height", "src", "type", "width"],
+            );
+            normalize_search_capabilities(document);
+            if kind == "offering" {
+                normalize_offering(document);
+            }
+        }
+        "collection-page" | "offering-page" => {
+            let item_kind = if kind == "offering-page" {
+                "offering"
+            } else {
+                "collection"
+            };
+            if let Some(items) = document
+                .as_object_mut()
+                .and_then(|value| value.get_mut("items"))
+                .and_then(Value::as_array_mut)
+            {
+                for item in items {
+                    normalize_agent_document(item, item_kind);
+                }
+            }
+        }
+        "filter-page" => filter_definitions(document, known_filter),
+        "sort-page" => filter_definitions(document, known_sort),
+        "problem" => filter_problem_parameters(document),
+        _ => {}
+    }
+}
+
+fn filter_list(document: &mut Value, member: &str, discriminator: &str, recognized: &[&str]) {
+    let Some(object) = document.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Array(items)) = object.get_mut(member) else {
+        return;
+    };
+    items.retain(|item| {
+        item.as_object()
+            .and_then(|value| value.get(discriminator))
+            .and_then(Value::as_str)
+            .is_none_or(|value| recognized.contains(&value))
+    });
+    if items.is_empty() {
+        object.remove(member);
+    }
+}
+
+fn filter_closed_object_list(document: &mut Value, member: &str, allowed: &[&str]) {
+    let Some(object) = document.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Array(items)) = object.get_mut(member) else {
+        return;
+    };
+    items.retain(|item| {
+        item.as_object()
+            .is_none_or(|value| value.keys().all(|key| allowed.contains(&key.as_str())))
+    });
+    if items.is_empty() {
+        object.remove(member);
+    }
+}
+
+fn filter_unknown_authentication(document: &mut Value, member: &str) {
+    let Some(object) = document.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Array(items)) = object.get_mut(member) else {
+        return;
+    };
+    items.retain(|item| !has_unknown_authentication(item));
+    if items.is_empty() {
+        object.remove(member);
+    }
+}
+
+fn has_unknown_authentication(value: &Value) -> bool {
+    value
+        .get("authentication")
+        .and_then(Value::as_str)
+        .is_some_and(|authentication| {
+            !["not-required", "optional", "required"].contains(&authentication)
+        })
+}
+
+fn strip_object_list(document: &mut Value, member: &str, allowed: &[&str]) {
+    let Some(items) = document.get_mut(member).and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        if let Some(object) = item.as_object_mut() {
+            object.retain(|key, _value| allowed.contains(&key.as_str()));
+        }
+    }
+}
+
+fn filter_payment_options(document: &mut Value) {
+    let Some(payments) = document
+        .pointer_mut("/protocols/payments")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    let recognized = [
+        "algorand",
+        "aptos",
+        "arbitrum",
+        "avalanche",
+        "base",
+        "card",
+        "ethereum",
+        "hedera",
+        "inflow",
+        "lightning",
+        "polygon",
+        "solana",
+        "stellar",
+        "stripe",
+        "tempo",
+        "ton",
+    ];
+    for payment in payments {
+        let Some(object) = payment.as_object_mut() else {
+            continue;
+        };
+        let Some(Value::Array(options)) = object.get_mut("options") else {
+            continue;
+        };
+        options.retain(|option| {
+            option
+                .as_str()
+                .is_none_or(|value| recognized.contains(&value))
+        });
+        if options.is_empty() {
+            object.remove("options");
+        }
+    }
+}
+
+fn normalize_branding(document: &mut Value) {
+    let Some(object) = document.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Object(branding)) = object.get_mut("branding") else {
+        return;
+    };
+    branding.retain(|key, _value| matches!(key.as_str(), "icon" | "logo"));
+    let recognized = ["image/png", "image/svg+xml", "image/webp"];
+    for member in ["icon", "logo"] {
+        let unknown = branding
+            .get(member)
+            .and_then(Value::as_object)
+            .and_then(|image| image.get("type"))
+            .and_then(Value::as_str)
+            .is_some_and(|image_type| !recognized.contains(&image_type));
+        if unknown {
+            branding.remove(member);
+        } else if let Some(Value::Object(image)) = branding.get_mut(member) {
+            image.retain(|key, _value| matches!(key.as_str(), "src" | "type"));
+        }
+    }
+    if branding.is_empty() {
+        object.remove("branding");
+    }
+}
+
+fn normalize_search_capabilities(document: &mut Value) {
+    let Some(object) = document.as_object_mut() else {
+        return;
+    };
+    let Some(Value::Object(capabilities)) = object.get_mut("search_capabilities") else {
+        return;
+    };
+    filter_inline_definitions(capabilities, "filters", known_filter);
+    filter_inline_definitions(capabilities, "sorts", known_sort);
+    if capabilities.is_empty() {
+        object.remove("search_capabilities");
+    }
+}
+
+fn filter_inline_definitions(
+    capabilities: &mut serde_json::Map<String, Value>,
+    member: &str,
+    recognized: fn(&Value) -> bool,
+) {
+    let Some(Value::Array(items)) = capabilities
+        .get_mut(member)
+        .and_then(Value::as_object_mut)
+        .and_then(|source| source.get_mut("inline"))
+    else {
+        return;
+    };
+    items.retain(recognized);
+    if items.is_empty() {
+        capabilities.remove(member);
+    }
+}
+
+fn normalize_offering(document: &mut Value) {
+    let Some(object) = document.as_object_mut() else {
+        return;
+    };
+    if object
+        .get("schema")
+        .and_then(Value::as_object)
+        .is_some_and(|schema| schema.keys().any(|key| key != "url"))
+    {
+        object.remove("schema");
+    }
+    let known_prices = ["fixed", "free", "metered", "quote", "range", "starting_at"];
+    let unknown_price = object
+        .get("price")
+        .and_then(Value::as_object)
+        .and_then(|price| price.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|price_type| !known_prices.contains(&price_type));
+    if unknown_price {
+        object.remove("price");
+    }
+    let Some(Value::Array(actions)) = object.get_mut("actions") else {
+        return;
+    };
+    actions.retain(|action| {
+        if has_unknown_authentication(action) {
+            return false;
+        }
+        if action.as_object().is_some_and(|value| {
+            value.keys().any(|key| {
+                ![
+                    "authentication",
+                    "description",
+                    "http",
+                    "id",
+                    "openapi",
+                    "rel",
+                ]
+                .contains(&key.as_str())
+            })
+        }) {
+            return false;
+        }
+        if action
+            .pointer("/http")
+            .and_then(Value::as_object)
+            .is_some_and(|value| {
+                value.keys().any(|key| {
+                    !["href", "method", "request", "response_content_types"].contains(&key.as_str())
+                })
+            })
+        {
+            return false;
+        }
+        if action
+            .pointer("/http/request")
+            .and_then(Value::as_object)
+            .is_some_and(|value| {
+                value
+                    .keys()
+                    .any(|key| !["content_type", "schema"].contains(&key.as_str()))
+            })
+        {
+            return false;
+        }
+        if action
+            .pointer("/http/request/schema")
+            .and_then(Value::as_object)
+            .is_some_and(|value| value.keys().any(|key| key != "url"))
+        {
+            return false;
+        }
+        if action
+            .get("openapi")
+            .and_then(Value::as_object)
+            .is_some_and(|value| {
+                value
+                    .keys()
+                    .any(|key| !["operation_id", "url"].contains(&key.as_str()))
+            })
+        {
+            return false;
+        }
+        action
+            .pointer("/http/method")
+            .and_then(Value::as_str)
+            .is_none_or(|method| method == "GET" || method == "POST")
+    });
+    if actions.is_empty() {
+        object.remove("actions");
+    }
+}
+
+fn filter_definitions(document: &mut Value, recognized: fn(&Value) -> bool) {
+    if let Some(items) = document
+        .as_object_mut()
+        .and_then(|value| value.get_mut("items"))
+        .and_then(Value::as_array_mut)
+    {
+        items.retain(recognized);
+    }
+}
+
+fn known_filter(definition: &Value) -> bool {
+    let Some(object) = definition.as_object() else {
+        return true;
+    };
+    let types = [
+        "boolean",
+        "date",
+        "date-time",
+        "decimal",
+        "integer",
+        "number",
+        "string",
+    ];
+    if object
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !types.contains(&value))
+    {
+        return false;
+    }
+    let operators = ["eq", "exists", "gt", "gte", "in", "lt", "lte"];
+    if object
+        .get("operators")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            values.iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|operator| !operators.contains(&operator))
+            })
+        })
+    {
+        return false;
+    }
+    !definition
+        .pointer("/unit/system")
+        .and_then(Value::as_str)
+        .is_some_and(|system| system != "service" && system != "ucum")
+}
+
+fn known_sort(definition: &Value) -> bool {
+    !definition
+        .get("keys")
+        .and_then(Value::as_array)
+        .is_some_and(|keys| {
+            keys.iter().any(|key| {
+                key.get("direction")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value != "ascending" && value != "descending")
+                    || key
+                        .get("missing")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value != "first" && value != "last")
+            })
+        })
+}
+
+fn filter_problem_parameters(document: &mut Value) {
+    let Some(parameters) = document
+        .get_mut("invalid_params")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    let recognized = ["body", "header", "path", "query"];
+    parameters.retain(|parameter| {
+        parameter
+            .get("in")
+            .and_then(Value::as_str)
+            .is_none_or(|location| recognized.contains(&location))
+    });
+}
+
+fn filter_agent_protocols(document: &mut Value) {
+    let Some(protocols) = document
+        .as_object_mut()
+        .and_then(|document| document.get_mut("protocols"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    filter_agent_protocol_category(protocols, "enrollment", &["aep"]);
+    filter_agent_protocol_category(protocols, "payments", &["mpp", "x402"]);
+    filter_agent_protocol_category(protocols, "trust", &["tap"]);
+    let remove_protocols = protocols.is_empty();
+    if remove_protocols {
+        if let Some(document) = document.as_object_mut() {
+            document.remove("protocols");
+        }
+    }
+}
+
+fn filter_agent_protocol_category(
+    protocols: &mut serde_json::Map<String, Value>,
+    category: &str,
+    recognized: &[&str],
+) {
+    let Some(Value::Array(descriptors)) = protocols.get_mut(category) else {
+        return;
+    };
+    let original_length = descriptors.len();
+    descriptors.retain(|descriptor| {
+        descriptor
+            .as_object()
+            .and_then(|value| value.get("name"))
+            .and_then(Value::as_str)
+            .is_none_or(|name| recognized.contains(&name))
+    });
+    if original_length != 0 && descriptors.is_empty() {
+        protocols.remove(category);
+    }
+}
+
 pub fn parse_collection(data: &[u8]) -> Result<Collection, ParseError> {
     parse(
         data,
@@ -480,6 +959,55 @@ mod tests {
                 name: crate::Protocol::Tap
             }]
         );
+    }
+
+    #[test]
+    fn agent_parser_filters_unknown_protocols_strictly() {
+        let document = br#"{
+            "description":"Plants","http":{"endpoint_base":"/odp"},"language":"en",
+            "localizations":["en"],"name":"Plants","odp_version":"1.0",
+            "operations":[{"authentication":"not-required","name":"get-offering"},
+            {"authentication":"not-required","name":"list-offerings"}],
+            "protocols":{
+                "enrollment":[{"name":"future-enrollment"},{"name":"aep"}],
+                "payments":[{"authentication":"not-required","name":"future-payment"},
+                {"authentication":"not-required","name":"mpp"},
+                {"authentication":"not-required","name":"x402"}],
+                "trust":[{"name":"future-trust"},{"name":"tap"}]
+            }
+        }"#;
+        assert!(parse_service_document(document).is_err());
+        let protocols = parse_agent_service_document(document)
+            .unwrap()
+            .protocols
+            .unwrap();
+        assert_eq!(protocols.enrollment[0].name, crate::Protocol::Aep);
+        assert_eq!(protocols.payments.len(), 2);
+        assert_eq!(protocols.trust[0].name, crate::Protocol::Tap);
+
+        let unknown_only = br#"{
+            "description":"Plants","http":{"endpoint_base":"/odp"},"language":"en",
+            "localizations":["en"],"name":"Plants","odp_version":"1.0",
+            "operations":[{"authentication":"not-required","name":"get-offering"},
+            {"authentication":"not-required","name":"list-offerings"}],
+            "protocols":{"trust":[{"name":"future-trust"}]}
+        }"#;
+        assert!(
+            parse_agent_service_document(unknown_only)
+                .unwrap()
+                .protocols
+                .is_none()
+        );
+
+        let malformed = br#"{
+            "description":"Plants","http":{"endpoint_base":"/odp"},"language":"en",
+            "localizations":["en"],"name":"Plants","odp_version":"1.0",
+            "operations":[{"authentication":"not-required","name":"get-offering"},
+            {"authentication":"not-required","name":"list-offerings"}],
+            "protocols":{"trust":[{"name":"tap","unexpected":true}]}
+        }"#;
+        assert!(parse_agent_service_document(malformed).is_err());
+        assert!(parse_agent_service_document(b"invalid").is_err());
     }
 
     #[test]

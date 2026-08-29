@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use odp_core::derive_service_origin;
+use odp_core::{derive_service_origin, parse_agent_service_document};
+use serde_json::{Value, json};
 use thiserror::Error;
 use url::Url;
 
@@ -153,7 +154,18 @@ impl DirectoryClient {
         let target = Url::parse(target)
             .map_err(|error| DirectoryError::InvalidRequest(error.to_string()))?;
         let response = self.request(method, target, body).await?;
-        let page = serde_json::from_slice::<SearchPage>(&response.body)
+        let mut value = serde_json::from_slice::<Value>(&response.body)
+            .map_err(|error| DirectoryError::InvalidResponse(error.to_string()))?;
+        if let Some(items) = value
+            .as_object_mut()
+            .and_then(|object| object.get_mut("items"))
+            .and_then(Value::as_array_mut)
+        {
+            for item in items {
+                normalize_service_protocols(item)?;
+            }
+        }
+        let page = serde_json::from_value::<SearchPage>(value)
             .map_err(|error| DirectoryError::InvalidResponse(error.to_string()))?;
         if page.items.len() > 100 {
             return Err(DirectoryError::InvalidResponse(
@@ -242,6 +254,42 @@ impl DirectoryClient {
     }
 }
 
+fn normalize_service_protocols(item: &mut Value) -> Result<(), DirectoryError> {
+    let Some(object) = item.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(protocols) = object.get("protocols").cloned() else {
+        return Ok(());
+    };
+    let candidate = json!({
+        "description": "Directory protocol validation",
+        "http": {"endpoint_base": "/"},
+        "language": "en",
+        "localizations": ["en"],
+        "name": "Directory Service",
+        "odp_version": "1.0",
+        "operations": [
+            {"authentication": "not-required", "name": "get-offering"},
+            {"authentication": "not-required", "name": "list-offerings"}
+        ],
+        "protocols": protocols
+    });
+    let encoded = serde_json::to_vec(&candidate)
+        .map_err(|error| DirectoryError::InvalidResponse(error.to_string()))?;
+    let document = parse_agent_service_document(&encoded)
+        .map_err(|error| DirectoryError::InvalidResponse(error.to_string()))?;
+    if let Some(protocols) = document.protocols {
+        object.insert(
+            "protocols".to_owned(),
+            serde_json::to_value(protocols)
+                .map_err(|error| DirectoryError::InvalidResponse(error.to_string()))?,
+        );
+    } else {
+        object.remove("protocols");
+    }
+    Ok(())
+}
+
 fn bounded(
     value: usize,
     fallback: usize,
@@ -322,6 +370,22 @@ mod tests {
         requests: Mutex<Vec<HttpRequest>>,
     }
 
+    struct ResponseTransport(Vec<u8>);
+
+    #[async_trait]
+    impl Transport for ResponseTransport {
+        async fn send(&self, _request: HttpRequest) -> Result<HttpResponse, TransportError> {
+            Ok(HttpResponse {
+                body: self.0.clone(),
+                headers: BTreeMap::from([(
+                    "content-type".to_owned(),
+                    "application/json".to_owned(),
+                )]),
+                status: 200,
+            })
+        }
+    }
+
     #[async_trait]
     impl Transport for MockTransport {
         async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
@@ -381,5 +445,26 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("max_items"));
+    }
+
+    #[tokio::test]
+    async fn filters_unknown_protocols_and_rejects_malformed_known_protocols() {
+        let body = br#"{"items":[{"description":"Plants","indexed_at":"2026-08-25T00:00:00Z","language":"en","localizations":["en"],"name":"Plants","operations":[],"protocols":{"payments":[{"authentication":"not-required","name":"future-payment"},{"authentication":"not-required","name":"mpp"}],"trust":[{"name":"future-trust"},{"name":"tap"}]},"service_origin":"https://demo.inflowpay.ai"}]}"#;
+        let client = DirectoryClient::with_transport(
+            Environment::Production,
+            Arc::new(ResponseTransport(body.to_vec())),
+        );
+        let page = client.search(&SearchRequest::default()).await.unwrap();
+        let protocols = page.items[0].protocols.as_ref().unwrap();
+        assert_eq!(protocols.payments.len(), 1);
+        assert_eq!(protocols.trust.len(), 1);
+
+        let malformed = String::from_utf8_lossy(body)
+            .replace("\"name\":\"mpp\"", "\"name\":\"mpp\",\"unexpected\":true");
+        let client = DirectoryClient::with_transport(
+            Environment::Production,
+            Arc::new(ResponseTransport(malformed.into_bytes())),
+        );
+        assert!(client.search(&SearchRequest::default()).await.is_err());
     }
 }

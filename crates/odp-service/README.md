@@ -45,6 +45,9 @@ ODP validation also requires the builder's `protocols` metadata to advertise enr
 an operation accepts or requires authentication. Use `trust` to advertise supported trust
 protocols; the host application remains responsible for their implementation.
 
+Service Document construction uses strict current-version validation. Unknown enrollment, payment,
+and trust protocol names are rejected.
+
 ## Catalog contract
 
 Every `Catalog` implements `list_offerings` and `get_offering`, and reports its supported operations
