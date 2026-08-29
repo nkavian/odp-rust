@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use odp_core::{
     Collection, FilterDefinition, Operation, SearchCapabilities, SortDefinition,
-    parse_filter_definition_page, parse_sort_definition_page,
+    normalize_agent_response, parse_filter_definition_page, parse_sort_definition_page,
 };
 use url::Url;
 
@@ -276,7 +276,8 @@ impl ServiceClient {
                     validate_filter_page,
                 )
                 .await?;
-            let page = parse_filter_definition_page(&data)?;
+            let page =
+                parse_filter_definition_page(&normalize_agent_response(&data, "filter-page")?)?;
             values.extend(page.items);
             next = page.next;
         }
@@ -310,7 +311,7 @@ impl ServiceClient {
                     validate_sort_page,
                 )
                 .await?;
-            let page = parse_sort_definition_page(&data)?;
+            let page = parse_sort_definition_page(&normalize_agent_response(&data, "sort-page")?)?;
             values.extend(page.items);
             next = page.next;
         }
@@ -374,12 +375,12 @@ fn resolve_reference(reference: &str, origin: &str) -> Result<Url, AgentError> {
 }
 
 fn validate_filter_page(data: &[u8]) -> Result<(), AgentError> {
-    parse_filter_definition_page(data)?;
+    parse_filter_definition_page(&normalize_agent_response(data, "filter-page")?)?;
     Ok(())
 }
 
 fn validate_sort_page(data: &[u8]) -> Result<(), AgentError> {
-    parse_sort_definition_page(data)?;
+    parse_sort_definition_page(&normalize_agent_response(data, "sort-page")?)?;
     Ok(())
 }
 

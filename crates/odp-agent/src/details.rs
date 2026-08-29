@@ -256,7 +256,7 @@ fn normalize_action(
         http: None,
         id: action.id.clone(),
         openapi: None,
-        rel: action.rel,
+        rel: action.rel.clone(),
     };
     if let Some(http) = &action.http {
         discovered.http = Some(DiscoveredHttpAction {

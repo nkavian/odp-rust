@@ -7,8 +7,8 @@ use std::{
 use odp_core::{
     Collection, CollectionSearchRequest, Offering, OfferingPage, OfferingSearchRequest, Operation,
     Page, ParseError, Representation, ServiceDocument, build_operation_url, derive_service_origin,
-    parse_collection, parse_offering, parse_offering_search_response, parse_page,
-    parse_problem_response, parse_service_document, resolve_continuation,
+    normalize_agent_response, parse_agent_service_document, parse_collection, parse_offering,
+    parse_offering_search_response, parse_page, parse_problem_response, resolve_continuation,
 };
 use odp_directory::{HttpRequest, ReqwestTransport, Transport, TransportError};
 use sha2::{Digest, Sha256};
@@ -147,7 +147,7 @@ impl ServiceClient {
                 validate_service_document_bytes,
             )
             .await?;
-        let document = parse_service_document(&response.body)?;
+        let document = parse_agent_service_document(&response.body)?;
         Ok(Inspection {
             document,
             final_url: response.final_url,
@@ -172,7 +172,7 @@ impl ServiceClient {
         let data = self
             .get_resource(Operation::GetCollection, id, Representation::Full)
             .await?;
-        Ok(parse_collection(&data)?)
+        Ok(parse_agent_collection(&data)?)
     }
 
     pub async fn search_collections(
@@ -188,7 +188,7 @@ impl ServiceClient {
                 representation,
             )
             .await?;
-        validate_collections(parse_page(&data)?)
+        validate_collections(parse_agent_collection_page(&data)?)
     }
 
     pub async fn list_offerings(
@@ -219,7 +219,7 @@ impl ServiceClient {
         let data = self
             .get_resource(Operation::GetOffering, id, Representation::Full)
             .await?;
-        Ok(parse_offering(&data)?)
+        Ok(parse_agent_offering(&data)?)
     }
 
     pub async fn search_offerings(
@@ -235,7 +235,7 @@ impl ServiceClient {
                 representation,
             )
             .await?;
-        Ok(parse_offering_search_response(&data)?)
+        Ok(parse_agent_offering_search_response(&data)?)
     }
 
     pub async fn continue_collections(&self, next: &str) -> Result<Page<Collection>, AgentError> {
@@ -251,7 +251,7 @@ impl ServiceClient {
                 validate_collection_page_bytes,
             )
             .await?;
-        validate_collections(parse_page(&response.body)?)
+        validate_collections(parse_agent_collection_page(&response.body)?)
     }
 
     pub async fn continue_offerings(
@@ -270,7 +270,7 @@ impl ServiceClient {
                 validate_offering_page_bytes,
             )
             .await?;
-        Ok(parse_offering_search_response(&response.body)?)
+        Ok(parse_agent_offering_search_response(&response.body)?)
     }
 
     pub async fn list_all_collections(
@@ -351,7 +351,15 @@ impl ServiceClient {
         let data = self
             .get_page_bytes(operation, id, representation, limit)
             .await?;
-        Ok(parse_page(&data)?)
+        let kind = if matches!(
+            operation,
+            Operation::ListCollections | Operation::SearchCollections
+        ) {
+            "collection-page"
+        } else {
+            "offering-page"
+        };
+        Ok(parse_page(&normalize_agent_response(&data, kind)?)?)
     }
 
     async fn get_offering_page(
@@ -364,7 +372,7 @@ impl ServiceClient {
         let data = self
             .get_page_bytes(operation, id, representation, limit)
             .await?;
-        Ok(parse_offering_search_response(&data)?)
+        Ok(parse_agent_offering_search_response(&data)?)
     }
 
     async fn get_page_bytes(
@@ -814,6 +822,22 @@ fn sha256_hex(data: &[u8]) -> String {
     encoded
 }
 
+fn parse_agent_collection(data: &[u8]) -> Result<Collection, ParseError> {
+    parse_collection(&normalize_agent_response(data, "collection")?)
+}
+
+fn parse_agent_offering(data: &[u8]) -> Result<Offering, ParseError> {
+    parse_offering(&normalize_agent_response(data, "offering")?)
+}
+
+fn parse_agent_collection_page(data: &[u8]) -> Result<Page<Collection>, ParseError> {
+    parse_page(&normalize_agent_response(data, "collection-page")?)
+}
+
+fn parse_agent_offering_search_response(data: &[u8]) -> Result<OfferingPage<Offering>, ParseError> {
+    parse_offering_search_response(&normalize_agent_response(data, "offering-page")?)
+}
+
 fn validate_collections(page: Page<Collection>) -> Result<Page<Collection>, AgentError> {
     for collection in &page.items {
         let mut inherited = collection.clone();
@@ -822,7 +846,7 @@ fn validate_collections(page: Page<Collection>) -> Result<Page<Collection>, Agen
         }
         let data = serde_json::to_vec(&inherited)
             .map_err(|error| AgentError::InvalidResponse(error.to_string()))?;
-        parse_collection(&data)?;
+        parse_agent_collection(&data)?;
     }
     Ok(page)
 }
@@ -835,34 +859,34 @@ fn validate_offerings(page: OfferingPage<Offering>) -> Result<OfferingPage<Offer
         }
         let data = serde_json::to_vec(&inherited)
             .map_err(|error| AgentError::InvalidResponse(error.to_string()))?;
-        parse_offering(&data)?;
+        parse_agent_offering(&data)?;
     }
     Ok(page)
 }
 
 fn validate_service_document_bytes(data: &[u8]) -> Result<(), AgentError> {
-    parse_service_document(data)?;
+    parse_agent_service_document(data)?;
     Ok(())
 }
 
 fn validate_collection_bytes(data: &[u8]) -> Result<(), AgentError> {
-    parse_collection(data)?;
+    parse_agent_collection(data)?;
     Ok(())
 }
 
 fn validate_offering_bytes(data: &[u8]) -> Result<(), AgentError> {
-    parse_offering(data)?;
+    parse_agent_offering(data)?;
     Ok(())
 }
 
 fn validate_collection_page_bytes(data: &[u8]) -> Result<(), AgentError> {
-    let page = parse_page(data)?;
+    let page = parse_agent_collection_page(data)?;
     validate_collections(page)?;
     Ok(())
 }
 
 fn validate_offering_page_bytes(data: &[u8]) -> Result<(), AgentError> {
-    validate_offerings(parse_offering_search_response(data)?)?;
+    validate_offerings(parse_agent_offering_search_response(data)?)?;
     Ok(())
 }
 
@@ -916,7 +940,9 @@ fn consume(response: RawResponse, maximum_bytes: usize) -> Result<RawResponse, A
         ));
     }
     if !(200..300).contains(&response.status) {
-        let message = parse_problem_response(&response.body, response.status)
+        let problem = normalize_agent_response(&response.body, "problem")
+            .unwrap_or_else(|_| response.body.clone());
+        let message = parse_problem_response(&problem, response.status)
             .map(|problem| {
                 if problem.detail.is_empty() {
                     problem.title
@@ -1155,7 +1181,7 @@ mod tests {
 
     #[tokio::test]
     async fn inspection_preserves_tap_trust_advertisement() {
-        let document = br#"{"description":"Plants","http":{"endpoint_base":"/odp"},"language":"en","localizations":["en"],"name":"Indica Flowers","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}],"protocols":{"trust":[{"name":"tap"}]}}"#;
+        let document = br#"{"description":"Plants","http":{"endpoint_base":"/odp"},"language":"en","localizations":["en"],"name":"Indica Flowers","odp_version":"1.0","operations":[{"authentication":"not-required","name":"get-offering"},{"authentication":"not-required","name":"list-offerings"}],"protocols":{"payments":[{"authentication":"not-required","name":"future-payment"},{"authentication":"not-required","name":"mpp"}],"trust":[{"name":"future-trust"},{"name":"tap"}]}}"#;
         let client = ServiceClient::with_transport(
             "https://demo.inflowpay.ai",
             Arc::new(MockTransport {
@@ -1165,8 +1191,10 @@ mod tests {
         .unwrap();
 
         let inspection = client.inspect().await.unwrap();
+        let protocols = inspection.document.protocols.unwrap();
+        assert_eq!(protocols.payments.len(), 1);
         assert_eq!(
-            inspection.document.protocols.unwrap().trust,
+            protocols.trust,
             [odp_core::TrustProtocol {
                 name: odp_core::Protocol::Tap
             }]

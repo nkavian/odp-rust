@@ -60,6 +60,8 @@ Search filters cover keywords, ODP operations, enrollment protocols, payment pro
 options, and their authentication requirements. Search responses can also carry facets for
 building data-driven filters without packaging the Directory's current vocabulary into the Agent.
 Each returned Service preserves its enrollment, payment, and trust protocol advertisements.
+Unrecognized protocol descriptors are filtered while recognized descriptors remain strictly
+validated.
 
 See the [workspace guide](../../README.md) and the
 [ODP specification](https://www.offeringprotocol.org/).

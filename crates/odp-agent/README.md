@@ -107,6 +107,9 @@ but it never invokes the target. The application uses each Action's authenticati
 the Service Document's enrollment, payment, and trust advertisements to compose the necessary
 protocol clients before making the resolved HTTP request.
 
+Inspection filters unrecognized enrollment, payment, and trust descriptors for compatible Agent
+processing. Recognized descriptors remain subject to current-version validation.
+
 See the [runnable Agent example](../../examples/odp-agent-discovery) for Directory composition,
 Collection navigation, full Offering details, and Action resolution.
 

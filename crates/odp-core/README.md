@@ -34,6 +34,10 @@ assert_eq!(document.name, "Indica Flowers");
 `ServiceProtocols::trust` carries generic trust-protocol advertisements. TAP support is represented
 by `TrustProtocol { name: Protocol::Tap }`.
 
+`parse_service_document` is the strict current-version Service parser. Agents use
+`parse_agent_service_document`, which filters unrecognized enrollment, payment, and trust
+descriptors while retaining strict validation for recognized descriptors.
+
 Validation failures retain structured paths and schema keywords so applications can present more
 than a generic parse failure:
 
