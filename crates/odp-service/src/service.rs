@@ -667,7 +667,10 @@ fn problem(status: u16, code: &str, detail: &str) -> Response {
         detail: detail.to_owned(),
         instance: String::new(),
         invalid_params: Vec::new(),
-        problem_type: "about:blank".to_owned(),
+        problem_type: format!(
+            "https://offeringprotocol.org/problems/{}",
+            code.to_ascii_lowercase().replace('_', "-")
+        ),
         status,
         title: detail.to_owned(),
     };
@@ -817,6 +820,25 @@ mod tests {
             .await;
         assert_eq!(response.status, 200);
         assert_eq!(parse_offering(&response.body).unwrap().id, "plant-1");
+    }
+
+    #[tokio::test]
+    async fn returns_problem_types_that_correspond_to_the_code() {
+        let service = Service::new(document(), Arc::new(TestCatalog)).unwrap();
+        let response = service
+            .handle(Request {
+                method: "GET".to_owned(),
+                path: "/odp/missing".to_owned(),
+                ..Request::default()
+            })
+            .await;
+        let problem = odp_core::parse_problem_details(&response.body).unwrap();
+
+        assert_eq!(problem.code, "NOT_FOUND");
+        assert_eq!(
+            problem.problem_type,
+            "https://offeringprotocol.org/problems/not-found"
+        );
     }
 
     #[test]
