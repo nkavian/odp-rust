@@ -554,7 +554,12 @@ pub fn parse_offering(data: &[u8]) -> Result<Offering, ParseError> {
 }
 
 pub fn parse_problem_details(data: &[u8]) -> Result<ProblemDetails, ParseError> {
-    parse_without_refinement(data, "problem-details.schema.json", "Problem Details")
+    parse(
+        data,
+        "problem-details.schema.json",
+        "Problem Details",
+        problem_details_issues,
+    )
 }
 
 pub fn parse_problem_response(data: &[u8], http_status: u16) -> Result<ProblemDetails, ParseError> {
@@ -677,6 +682,22 @@ fn parse_without_refinement<T: DeserializeOwned>(
     document_type: &str,
 ) -> Result<T, ParseError> {
     parse(data, schema_name, document_type, |_| Vec::new())
+}
+
+fn problem_details_issues(value: &ProblemDetails) -> Vec<ValidationIssue> {
+    let expected_type = format!(
+        "https://offeringprotocol.org/problems/{}",
+        value.code.to_ascii_lowercase().replace('_', "-")
+    );
+    if value.problem_type == expected_type {
+        Vec::new()
+    } else {
+        vec![issue(
+            "/type",
+            "problem-type",
+            "must correspond to the problem code",
+        )]
+    }
 }
 
 fn parse<T: DeserializeOwned>(
@@ -935,6 +956,18 @@ mod tests {
             ]
         }"#;
         assert_eq!(parse_service_document(document).unwrap().name, "Plants");
+    }
+
+    #[test]
+    fn rejects_problem_types_that_do_not_correspond_to_the_code() {
+        let problem = br#"{
+            "code":"NOT_FOUND",
+            "status":404,
+            "title":"Not found",
+            "type":"https://offeringprotocol.org/problems/validation-failed"
+        }"#;
+
+        assert!(parse_problem_details(problem).is_err());
     }
 
     #[test]
