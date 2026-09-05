@@ -96,6 +96,7 @@ jobs:
         run: make verify consumer-smoke conformance interoperability
         env:
           ODP_NODE_DIR: .conformance/odp-node
+          ODP_RUST_VERSION: ${{ steps.release.outputs.version }}
           ODP_SPECS_DIR: .conformance/odp-specs
           RUSTUP_TOOLCHAIN: stable
 

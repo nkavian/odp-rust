@@ -17,8 +17,8 @@ readme = "README.md"
 futures.workspace = true
 httpdate.workspace = true
 jsonschema.workspace = true
-odp-core = { version = "0.1.0", path = "../odp-core" }
-odp-directory = { version = "0.1.0", path = "../odp-directory" }
+odp-core = { version = "0.1.1", path = "../odp-core" }
+odp-directory = { version = "0.1.1", path = "../odp-directory" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

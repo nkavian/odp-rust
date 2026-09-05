@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "odp-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "odp-conformance"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "odp-agent",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "odp-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "include_dir",
  "jsonschema",
@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "odp-directory"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "odp-core",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "odp-examples"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "odp-agent",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "odp-service"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
