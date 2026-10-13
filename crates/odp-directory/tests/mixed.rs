@@ -61,6 +61,41 @@ fn service() -> Value {
 }
 
 #[tokio::test]
+async fn preserves_arc_and_monad_payment_metadata() {
+    let (client, stub) = setup();
+    let payment = json!({"name":"x402","authentication":"not-required","options":["arc","monad"]});
+    let mut record = item("service");
+    record["service"]["protocols"] = json!({"payments":[payment.clone()]});
+    stub.ok(json!({"items":[record],"facets":{
+        "payments":[{"count":1,"value":payment}],
+        "payment_options":[{"count":1,"value":{"name":"x402","option":"arc"}},
+                           {"count":1,"value":{"name":"x402","option":"monad"}}]
+    }}));
+    let response = client
+        .search(&ResourceSearchRequest::default())
+        .await
+        .unwrap();
+    let DirectoryResult::Service(record) = &response.items[0] else {
+        panic!("service")
+    };
+    let expected = vec![odp_core::PaymentOption::Arc, odp_core::PaymentOption::Monad];
+    assert_eq!(
+        record.service.protocols.as_ref().unwrap().payments[0].options,
+        expected
+    );
+    let facets = response.facets.unwrap();
+    assert_eq!(facets.payments[0].value.options, expected);
+    assert_eq!(
+        facets
+            .payment_options
+            .iter()
+            .map(|facet| facet.value.option)
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
+
+#[tokio::test]
 async fn sends_suggestion_filters_without_mutating_the_request() {
     let (client, stub) = setup();
     stub.ok(json!({"items":["Weather"]}));
@@ -68,6 +103,11 @@ async fn sends_suggestion_filters_without_mutating_the_request() {
         prefix: " we ".to_owned(),
         filters: Some(ServiceFilters {
             keywords: vec!["weather".to_owned()],
+            payments: vec![PaymentFilter {
+                name: odp_core::Protocol::Mpp,
+                authentication: None,
+                options: vec![odp_core::PaymentOption::Arc, odp_core::PaymentOption::Monad],
+            }],
             ..Default::default()
         }),
         ..Default::default()
@@ -82,7 +122,7 @@ async fn sends_suggestion_filters_without_mutating_the_request() {
     assert_eq!(requests[0].method, "POST");
     assert_eq!(
         serde_json::from_slice::<Value>(&requests[0].body).unwrap(),
-        json!({"prefix":"we", "filters":{"keywords":["weather"]}})
+        json!({"prefix":"we", "filters":{"keywords":["weather"],"payments":[{"name":"mpp","options":["arc","monad"]}]}})
     );
 }
 

@@ -3,6 +3,22 @@
 mod support;
 
 #[test]
+fn preserves_arc_and_monad_payment_options() {
+    let document = support::amend(
+        support::service_document(),
+        serde_json::json!({"protocols":{"payments":[{"name":"x402","authentication":"not-required","options":["arc","monad"]}]}}),
+    );
+    let parsed = odp_core::parse_service_document(&support::encode(&document)).unwrap();
+    assert_eq!(
+        parsed.protocols.as_ref().unwrap().payments[0].options,
+        [odp_core::PaymentOption::Arc, odp_core::PaymentOption::Monad]
+    );
+    let encoded = serde_json::to_vec(&parsed).unwrap();
+    let decoded = odp_core::parse_service_document(&encoded).unwrap();
+    assert_eq!(decoded.protocols, parsed.protocols);
+}
+
+#[test]
 fn accepts_compatible_minor_versions_without_rewriting_the_input() {
     for version in ["1.0", "1.1", "1.7"] {
         let document = support::amend(

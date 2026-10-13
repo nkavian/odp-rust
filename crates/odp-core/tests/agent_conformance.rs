@@ -125,13 +125,20 @@ fn removes_protocols_whose_every_category_was_dropped() {
 #[test]
 fn drops_a_payment_option_odp_does_not_name() {
     let document = read(json!({"protocols": {"payments": [
-        {"authentication": "not-required", "name": "mpp", "options": ["card", "cheque"]}
+        {"authentication": "not-required", "name": "mpp", "options": ["arc", "card", "monad", "cheque"]}
     ]}}))
     .unwrap();
 
     let payments = &document.protocols.unwrap().payments;
     assert_eq!(payments.len(), 1);
-    assert_eq!(payments[0].options.len(), 1);
+    assert_eq!(
+        payments[0].options,
+        [
+            odp_core::PaymentOption::Arc,
+            odp_core::PaymentOption::Card,
+            odp_core::PaymentOption::Monad
+        ]
+    );
 }
 
 /// A branding image in a format the Agent cannot render is dropped; the other one stays.
