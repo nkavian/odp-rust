@@ -336,7 +336,10 @@ async fn continues_a_redirected_search_as_a_get() {
         let last = stub.last();
         assert_eq!(last.method, "GET", "{status}");
         assert!(last.body.is_empty(), "{status}");
-        assert_eq!(last.url, "https://api.inflowpay.ai/v1/services/search/v2");
+        assert_eq!(
+            last.url,
+            "https://directory.offeringprotocol.org/v1/services/search/v2"
+        );
     }
 }
 
@@ -367,7 +370,7 @@ async fn keeps_the_method_across_a_preserving_redirect() {
 async fn refuses_a_redirect_that_leaves_the_directory() {
     for location in [
         "https://elsewhere.example/v1/services/search",
-        "http://api.inflowpay.ai/v1/services/search",
+        "http://directory.offeringprotocol.org/v1/services/search",
     ] {
         let stub = Stub::new(move |_| Ok(bare(302, &[("location", location)])));
         let error = client(&stub)
