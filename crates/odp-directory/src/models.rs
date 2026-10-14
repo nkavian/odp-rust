@@ -17,7 +17,7 @@ pub enum Environment {
 impl Environment {
     pub const fn origin(self) -> &'static str {
         match self {
-            Self::Production => "https://api.inflowpay.ai",
+            Self::Production => "https://directory.offeringprotocol.org",
             Self::Sandbox => "https://sandbox.inflowpay.ai",
         }
     }

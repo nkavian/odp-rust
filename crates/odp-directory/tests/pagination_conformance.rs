@@ -208,8 +208,8 @@ async fn refuses_a_continuation_that_leaves_the_directory() {
     for next in [
         "https://elsewhere.example/v1/services/search",
         "//elsewhere.example/v1/services/search",
-        "http://api.inflowpay.ai/v1/services/search",
-        "https://user:secret@api.inflowpay.ai/v1/services/search",
+        "http://directory.offeringprotocol.org/v1/services/search",
+        "https://user:secret@directory.offeringprotocol.org/v1/services/search",
     ] {
         let error = client(&stub)
             .continue_search_services(next)
@@ -244,7 +244,7 @@ async fn resolves_a_relative_continuation_against_the_directory() {
         .unwrap();
     assert_eq!(
         stub.last().url,
-        "https://api.inflowpay.ai/v1/services/search?cursor=c2"
+        "https://directory.offeringprotocol.org/v1/services/search?cursor=c2"
     );
 }
 

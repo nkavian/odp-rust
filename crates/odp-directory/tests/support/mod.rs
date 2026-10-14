@@ -15,8 +15,8 @@ use odp_directory::{
 
 pub const JSON: &str = "application/json";
 pub const PROBLEM_JSON: &str = "application/problem+json";
-pub const ORIGIN: &str = "https://api.inflowpay.ai";
-pub const SEARCH_URL: &str = "https://api.inflowpay.ai/v1/services/search";
+pub const ORIGIN: &str = "https://directory.offeringprotocol.org";
+pub const SEARCH_URL: &str = "https://directory.offeringprotocol.org/v1/services/search";
 
 /// How a [`Stub`] answers one request.
 type Reply = dyn Fn(&HttpRequest) -> Result<HttpResponse, TransportError> + Send + Sync;

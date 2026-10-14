@@ -6,7 +6,7 @@ This crate owns fixed production and sandbox Directory access, validated Service
 facets, suggestions, and opaque continuation traversal. Its asynchronous client provides a
 Rustls-backed HTTP transport and permits callers to inject a compatible transport.
 
-Use `Environment::Production` for `https://api.inflowpay.ai` or `Environment::Sandbox` for
+Use `Environment::Production` for `https://directory.offeringprotocol.org` or `Environment::Sandbox` for
 `https://sandbox.inflowpay.ai`. These are the only Directory origins accepted by the client.
 
 ```rust,no_run
